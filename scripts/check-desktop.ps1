@@ -16,14 +16,11 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $sourceFolder '空目录') -Force | Out-Null
     [System.IO.File]::WriteAllText($sourceFile, '中文 shortcut check')
     [System.IO.File]::WriteAllText((Join-Path $sourceFolder '说明.md'), 'nested folder check')
-    $shell = New-Object -ComObject WScript.Shell
-    $linkPath = Join-Path $fixture '归序.lnk'
-    $link = $shell.CreateShortcut($linkPath)
-    $link.TargetPath = Join-Path $appPath 'TidyDrop.exe'
-    $link.WorkingDirectory = $appPath
-    $link.Save()
-    [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($link) | Out-Null
-    [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
+    # Exercise the application's Unicode shortcut implementation, not a second script implementation.
+    $creator = Start-Process -FilePath (Join-Path $appPath 'TidyDrop.exe') -ArgumentList '--shortcut-check' -WindowStyle Hidden -PassThru
+    if (-not $creator.WaitForExit(10000)) { Stop-Process -Id $creator.Id; throw '入口创建检查超时' }
+    if ($creator.ExitCode -ne 0) { Get-Content -LiteralPath (Join-Path $appPath 'shortcut-check/error.txt'); throw '入口创建失败' }
+    $linkPath = Join-Path $appPath 'shortcut-check/归序.lnk'
     $process = Start-Process -FilePath $linkPath -ArgumentList ('"{0}" "{1}"' -f $sourceFile, $sourceFolder) -WindowStyle Hidden -PassThru
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     $visibleWindow = $false

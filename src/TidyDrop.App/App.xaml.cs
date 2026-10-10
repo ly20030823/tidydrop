@@ -15,6 +15,14 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.SequenceEqual(["--shortcut-check"]))
+        {
+            var fixture = Path.Combine(AppContext.BaseDirectory, "shortcut-check");
+            Directory.CreateDirectory(fixture);
+            try { DesktopShortcut.Create(fixture); DesktopShortcut.Create(fixture); Shutdown(0); }
+            catch (Exception ex) { File.WriteAllText(Path.Combine(fixture, "error.txt"), ex.ToString()); Shutdown(1); }
+            return;
+        }
         var smokeTest = e.Args.Contains("--smoke-test");
         pipeName = "TidyDrop-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Environment.UserName + AppContext.BaseDirectory)))[..20];
         if (smokeTest) pipeName += "-checks";
