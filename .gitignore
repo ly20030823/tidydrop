@@ -1,0 +1,7 @@
+bin/
+obj/
+data/
+artifacts/
+.vs/
+node_modules/
+frontend/dist/

@@ -1,0 +1,33 @@
+name: Build and check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.25.0'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Build frontend, check core, and publish app
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Check background desktop shortcut
+        shell: pwsh
+        run: ./scripts/check-desktop.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TidyDrop-windows
+          path: artifacts/release/

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TidyDrop</AssemblyName>
+    <Version>0.3.0</Version>
+    <Product>归序</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/TidyDrop.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../TidyDrop.Core/TidyDrop.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <Content Include="../../frontend/dist/**/*"><Link>Web/%(RecursiveDir)%(Filename)%(Extension)</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></Content>
+  </ItemGroup>
+  <Target Name="RequireFrontend" BeforeTargets="BeforeBuild" Condition="!Exists('../../frontend/dist/index.html')"><Error Text="请先在 frontend 目录运行 pnpm build，生成本地 React 界面。" /></Target>
+</Project>
