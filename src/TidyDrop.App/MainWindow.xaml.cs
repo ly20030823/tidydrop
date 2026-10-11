@@ -135,9 +135,7 @@ public partial class MainWindow : Window
                     var archive = library.FirstOrDefault(item => item.Id == archiveId);
                     if (archive is not null && Organizer.Exists(archive.Path))
                     {
-                        var explorer = new ProcessStartInfo("explorer.exe");
-                        explorer.ArgumentList.Add("/select," + archive.Path);
-                        Process.Start(explorer);
+                        await ExplorerNavigation.RevealAsync(archive.Path);
                     }
                     else Notify("这个项目已被移走，请刷新归档空间。", true);
                     break;
@@ -329,7 +327,7 @@ public partial class MainWindow : Window
             await WaitUntil(() => Task.FromResult(settings.AutoOrganize));
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"拖入后自动整理\"]').click()");
             await WaitUntil(() => Task.FromResult(!settings.AutoOrganize));
-            var source = Path.Combine(testDirectory, "桥接检查.txt");
+            var source = Path.Combine(testDirectory, "桥接 检查, 终稿.txt");
             File.WriteAllText(source, "React bridge check 中文");
             DesktopShortcut.Create(testDirectory);
             DesktopShortcut.Create(testDirectory);
@@ -341,7 +339,7 @@ public partial class MainWindow : Window
             await WaitUntil(() => Task.FromResult(!busy && history.Any(entry => entry.State == "已归档")));
             if (File.Exists(source) || File.ReadAllText(history[0].Destination) != "React bridge check 中文") throw new IOException("Bridge move check failed.");
             settings.AutoOrganize = true;
-            var sourceFolder = Path.Combine(testDirectory, "项目材料");
+            var sourceFolder = Path.Combine(testDirectory, "项目 材料, v1");
             Directory.CreateDirectory(Path.Combine(sourceFolder, "空目录"));
             File.WriteAllText(Path.Combine(sourceFolder, "说明.md"), "folder check 中文");
             Browser.CoreWebView2.PostWebMessageAsJson("{\"type\":\"navigate\",\"page\":\"library\"}");
@@ -349,14 +347,52 @@ public partial class MainWindow : Window
             await WaitUntil(() => Task.FromResult(!busy && library.Count == 2));
             await WaitUntil(async () => (await Browser.ExecuteScriptAsync("document.querySelectorAll('.archive-row').length")) == "2");
             if (!(await Browser.ExecuteScriptAsync("document.querySelector('h1')?.textContent")).Contains("收下的每一份")) throw new IOException("Desktop drop changed the current page.");
+            // Several days, months, and types expose incorrect cross-filtering and counts.
+            AddLibrarySample(DateTime.Today, "图片", "界面参考.png");
+            AddLibrarySample(DateTime.Today.AddDays(-1), "文档", "阶段计划.txt");
+            AddLibrarySample(DateTime.Today.AddDays(-1), "图片", "设计参考.png");
+            AddLibrarySample(DateTime.Today.AddMonths(-1), "压缩包", "历史材料.zip");
+            await RefreshLibrary();
+            await CheckScript("document.querySelectorAll('.archive-row').length === 6 && document.querySelectorAll('.timeline-day').length === 3");
             await Task.Delay(150);
             using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-preview.png")))
                 await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+            await Browser.ExecuteScriptAsync("document.querySelector('.type-chips [data-category=\"文档\"]').click()");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 2 && Array.from(document.querySelectorAll('.archive-row')).every(row => row.dataset.category === '文档')");
+            var yesterday = DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd");
+            await Browser.ExecuteScriptAsync($"document.querySelector('.date-rail [data-date=\"{yesterday}\"]').click()");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 1");
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按类型').click()");
-            await WaitUntil(async () => (await Browser.ExecuteScriptAsync("document.querySelectorAll('.library-group').length")) == "2");
+            await CheckScript("document.querySelectorAll('.type-card').length === 5 && document.querySelectorAll('.archive-row').length === 1 && document.querySelector('.type-card[data-category=\"文档\"]').getAttribute('aria-pressed') === 'true'");
+            await Browser.ExecuteScriptAsync("const dateSelect = document.querySelector('[aria-label=\"筛选收纳日期\"]'); dateSelect.value = ''; dateSelect.dispatchEvent(new Event('change', {bubbles:true}))");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 2");
+            await Browser.ExecuteScriptAsync("document.querySelector('.type-card[data-category=\"图片\"]').click()");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 2 && Array.from(document.querySelectorAll('.archive-row')).every(row => row.dataset.category === '图片')");
+            await Browser.ExecuteScriptAsync("document.querySelector('.reset-filters').click()");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 6");
             await Task.Delay(100);
             using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-types.png")))
                 await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+            // React-controlled input: dispatch a native edit so onChange observes the new value.
+            await SetLibrarySearch("  终稿  ");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 1 && document.querySelector('.archive-name').textContent.includes('终稿')");
+            await SetLibrarySearch("没有这样的材料");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 0 && document.querySelector('.empty-state') !== null");
+            await Browser.ExecuteScriptAsync("document.querySelector('.empty-state button').click()");
+            await CheckScript("document.querySelectorAll('.archive-row').length === 6 && document.querySelector('[aria-label=\"搜索归档空间\"]').value === ''");
+            if (Environment.GetCommandLineArgs().Contains("--check-explorer"))
+            {
+                var file = history.Single(entry => !entry.IsDirectory);
+                await SetLibrarySearch("终稿");
+                await CheckScript("document.querySelectorAll('.archive-row').length === 1");
+                await ExplorerSelectionCheck.VerifyAsync(file.Destination, async () => { await Browser.ExecuteScriptAsync("document.querySelector('.reveal-button').click()"); });
+                await Browser.ExecuteScriptAsync("document.querySelector('.reset-filters').click()");
+                await CheckScript("document.querySelectorAll('.archive-row').length === 6");
+                await Browser.ExecuteScriptAsync("document.querySelector('.type-card[data-category=\"文件夹\"]').click()");
+                await CheckScript("document.querySelectorAll('.archive-row').length === 1");
+                await ExplorerSelectionCheck.VerifyAsync(history.Single(entry => entry.IsDirectory).Destination, async () => { await Browser.ExecuteScriptAsync("document.querySelector('.reveal-button').click()"); });
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-explorer-checks.txt"), "PASS real Explorer folder and selection from file button\nPASS real Explorer folder and selection from folder button\nPASS Chinese names, spaces, and commas\n");
+            }
             Browser.CoreWebView2.PostWebMessageAsJson("{\"type\":\"navigate\",\"page\":\"history\"}");
             await WaitUntil(async () => (await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).some(b => b.textContent === '撤销')")) == "true");
             await Task.Delay(100);
@@ -369,11 +405,22 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '撤销').click()");
             await WaitUntil(() => Task.FromResult(!busy && history.All(entry => entry.State == "已撤销")));
             if (File.ReadAllText(source) != "React bridge check 中文") throw new IOException("Bridge undo check failed.");
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS date and type library views\n");
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\n");
             Application.Current.Shutdown(0);
         }
         catch (Exception ex) { Fail(ex); }
     }
+
+    private void AddLibrarySample(DateTime date, string category, string name)
+    {
+        var folder = Path.Combine(settings.RootFolder, "归序", date.ToString("yyyy-MM"), date.ToString("yyyy-MM-dd"), category);
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, name), "Generated library check fixture");
+    }
+
+    private Task CheckScript(string predicate) => WaitUntil(async () => await Browser.ExecuteScriptAsync(predicate) == "true");
+
+    private Task SetLibrarySearch(string value) => Browser.ExecuteScriptAsync($"Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('[aria-label=\"搜索归档空间\"]'), {JsonSerializer.Serialize(value)}); document.querySelector('[aria-label=\"搜索归档空间\"]').dispatchEvent(new Event('input', {{bubbles:true}}))");
 
     private static async Task WaitUntil(Func<Task<bool>> predicate)
     {
