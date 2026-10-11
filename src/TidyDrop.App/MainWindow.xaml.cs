@@ -326,7 +326,7 @@ public partial class MainWindow : Window
     private async Task ChangeContextMenu(bool install)
     {
         if (!smokeTest && install && ShellIntegration.NeedsLocalTrust()
-            && MessageBox.Show(this, "此个人开发版需要 Windows 信任随附的归序签名，才能添加一级右键菜单。\n\n继续会将这枚公开证书加入当前用户的「受信任人」证书库，并注册归序菜单组件。移除菜单时，会清理归序新增的信任。\n\n是否信任归序签名并添加菜单？", "添加复制路径菜单", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            && MessageBox.Show(this, "此个人开发版需要 Windows 信任随附的归序签名，才能添加一级右键菜单。\n\n继续会请求管理员确认，将公开证书加入本机的「受信任人」证书库。此信任对所有账户生效，也适用于同一私钥签名的其他安装包；菜单仅注册给当前账户。不会加入根证书库。\n\n移除菜单时会清理归序新增的信任；其他账户仍使用此菜单时保留。\n\n是否信任归序签名并添加菜单？", "添加复制路径菜单", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         ++contextMenuRevision;
         busy = true; isError = false;
         message = install ? "正在添加右键菜单…" : "正在移除右键菜单…";

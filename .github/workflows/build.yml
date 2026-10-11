@@ -21,13 +21,32 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
-      - name: Build frontend, check core, and publish app
+      - name: Build frontend, check core, and publish self-contained app
         shell: pwsh
-        run: ./scripts/build.ps1
+        run: ./scripts/build.ps1 -SelfContained
       - name: Check background desktop shortcut
         shell: pwsh
         run: ./scripts/check-desktop.ps1
+      - name: Prepare Inno Setup compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path artifacts/tools -Force | Out-Null
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile artifacts/tools/inno-setup.exe
+          $signature = Get-AuthenticodeSignature artifacts/tools/inno-setup.exe
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys') { throw 'Compiler publisher verification failed' }
+          $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/PORTABLE=1','/CURRENTUSER',('/DIR="'+$PWD.Path+'\artifacts\tools\inno"'))
+          $process = Start-Process artifacts/tools/inno-setup.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw 'Compiler setup failed' }
+      - name: Build installer (local development signature)
+        shell: pwsh
+        run: ./scripts/build-installer.ps1 -AppDirectory artifacts/release -SkipBuild
+      - name: Check install, upgrade, UI, and uninstall without system-menu changes
+        shell: pwsh
+        run: ./scripts/check-installer.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: TidyDrop-windows
-          path: artifacts/release/
+          path: |
+            artifacts/release/
+            artifacts/installer/

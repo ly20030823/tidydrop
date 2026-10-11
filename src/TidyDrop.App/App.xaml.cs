@@ -10,6 +10,7 @@ namespace TidyDrop.App;
 public partial class App : Application
 {
     private Mutex? instance;
+    private Mutex? installationGuard;
     private readonly CancellationTokenSource cancellation = new();
     private string pipeName = "";
     protected override void OnStartup(StartupEventArgs e)
@@ -28,6 +29,8 @@ public partial class App : Application
         if (smokeTest) pipeName += "-checks";
         if (!smokeTest)
         {
+            // The installer asks the user to close all copies before updating or uninstalling.
+            installationGuard = new Mutex(false, "Local\\TidyDrop.App.Active");
             instance = new Mutex(true, "Local\\" + pipeName, out var first);
             if (!first)
             {
@@ -103,6 +106,7 @@ public partial class App : Application
     {
         cancellation.Cancel();
         instance?.Dispose();
+        installationGuard?.Dispose();
         base.OnExit(e);
     }
 }

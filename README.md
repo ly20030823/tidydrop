@@ -20,7 +20,9 @@
 
 ## 开始使用
 
-目前可从源代码构建便携程序。运行要求：Windows 10/11、[.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0)、[Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+推荐从 **[GitHub Releases](https://github.com/ly20030823/tidydrop/releases)** 下载 `TidyDrop-Setup-版本-win-x64.exe`，适用于 Windows 11 x64。安装包自带 .NET 运行环境，缺少 WebView2 时自动联网安装；可创建桌面入口，选择是否添加一级右键菜单。首次打开后选择归档总文件夹即可使用。当前为个人开发签名，可能出现 Windows 未识别应用提醒；启用右键菜单需要明确授权本机证书信任与管理员确认。详细步骤、升级与卸载见 [安装与 Release 说明](docs/installation-and-release.md)。
+
+也可下载自带运行环境的便携 ZIP，解压整个目录到固定、可写的位置；便携版需要系统已有 WebView2。从源码默认构建的轻量便携程序仍需要 [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0)。
 
 1. 将**整个程序文件夹**放在固定、可写的位置，打开 `TidyDrop.exe`。
 2. 选择归档总文件夹，例如 `D:\我的材料`。
@@ -109,7 +111,7 @@ dotnet run --project tests/TidyDrop.Checks/TidyDrop.Checks.csproj -- artifacts/c
 dotnet publish src/TidyDrop.App/TidyDrop.App.csproj -c Release --no-self-contained -o artifacts/app
 ```
 
-运行 `artifacts/app/TidyDrop.exe`。分发时需要整个输出目录，不能只复制 exe。`scripts/build.ps1` 可以完成菜单组件构建、本地签名、复制路径检查、界面构建、核心检查和发布，并附带第三方许可文件。签名私钥不导出；当前个人开发版安装菜单时需要明确授权当前用户的本地签名信任，详见 [右键菜单说明](docs/context-menu.md)。
+运行 `artifacts/app/TidyDrop.exe`。分发时需要整个输出目录，不能只复制 exe。`scripts/build.ps1` 可以完成菜单组件构建、本地签名、复制路径检查、界面构建、核心检查和发布，并附带第三方许可文件。签名私钥不导出；当前个人开发版安装菜单时需要明确授权本机的本地签名信任，详见 [右键菜单说明](docs/context-menu.md)。
 
 ```text
 frontend/                  React + TypeScript 界面

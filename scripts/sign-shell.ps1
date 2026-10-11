@@ -1,4 +1,4 @@
-param([string]$Directory = 'artifacts/shell')
+param([string]$Directory = 'artifacts/shell', [string[]]$Files = @('TidyDrop.Shell.dll','TidyDrop.CopyPath.msix'), [switch]$SkipExport)
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path $PSScriptRoot -Parent
 $output = [IO.Path]::GetFullPath((Join-Path $workspace $Directory))
@@ -10,9 +10,9 @@ if (-not $certificate) {
 $sdkRoot = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots').KitsRoot10
 $signTool = Get-ChildItem -Path (Join-Path $sdkRoot 'bin/*/x64/signtool.exe') | Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $signTool) { throw '需要 Windows SDK 的 SignTool。' }
-foreach ($file in @('TidyDrop.Shell.dll','TidyDrop.CopyPath.msix')) {
+foreach ($file in $Files) {
     & $signTool.FullName sign /fd SHA256 /s My /sha1 $certificate.Thumbprint (Join-Path $output $file) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw '菜单组件本地签名失败。' }
 }
-Export-Certificate -Cert $certificate -FilePath (Join-Path $output 'TidyDrop.CopyPath.cer') -Force | Out-Null
+if (-not $SkipExport) { Export-Certificate -Cert $certificate -FilePath (Join-Path $output 'TidyDrop.CopyPath.cer') -Force | Out-Null }
 Write-Host '本地签名完成。仅导出公开证书，私钥保留在当前用户证书库，不能导出。'

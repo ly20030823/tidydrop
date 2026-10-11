@@ -16,7 +16,7 @@ internal static class ShellIntegration
         var path = Path.Combine(AppContext.BaseDirectory, "Shell", "TidyDrop.CopyPath.cer");
         if (!File.Exists(path)) return false;
         using var certificate = X509CertificateLoader.LoadCertificateFromFile(path);
-        using var trusted = new X509Store(StoreName.TrustedPeople, StoreLocation.CurrentUser);
+        using var trusted = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
         trusted.Open(OpenFlags.ReadOnly);
         return trusted.Certificates.Find(X509FindType.FindByThumbprint, certificate.Thumbprint, false).Count == 0;
     }
@@ -39,6 +39,8 @@ internal static class ShellIntegration
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
         };
         foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", script, "-Action", action }) start.ArgumentList.Add(argument);
+        // Installation callers obtain explicit consent before the script requests UAC elevation.
+        if (action == "install") start.ArgumentList.Add("-TrustConsent");
         using var process = Process.Start(start) ?? throw new IOException("无法启动菜单组件注册。");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
