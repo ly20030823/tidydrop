@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { groupMenus, inScene, scopeSummary, withParents } from './src/MenuGroups.ts';
+import { groupMenus, inScene, menuTrail, softwareMenus, scopeSummary, withParents } from './src/MenuGroups.ts';
 const entry = (id, changes = {}) => ({ id, commandKey: 'one-command', location: '*', title: '菜单功能', source: '测试软件', scope: '所有文件', kind: '更多选项', enabled: true, canToggle: true, managed: false, detail: '', ...changes });
 const entries = [entry('a'), entry('b', { scope: '文件夹', enabled: false, managed: true }), entry('c', { canToggle: false }), entry('d', { kind: '一级菜单', canToggle: false })];
 const groups = groupMenus(entries);
@@ -22,3 +22,20 @@ assert.equal(inScene(entry('a', { scope: '特定类型 · .docx', location: 'Wor
 const parent = entry('parent'), child = entry('child', { parentId: 'parent' });
 assert.deepEqual(withParents([child], [parent, child]).map(e => e.id), ['child', 'parent']);
 console.log('PASS distinct verbs, unknown identities, parent hierarchy and scene/type matching');
+const wp1 = entry('wp1', { source: 'WPS Office', commandKey: 'parent-command', title: '图片工具' });
+const wp2 = entry('wp2', { source: 'WPS Office', commandKey: 'parent-command', title: '图片工具', location: 'Directory', scope: '文件夹' });
+const children = [entry('wc1', { source: '共享组件', commandKey: 'child-command', parentId: 'wp1' }), entry('wc2', { source: '共享组件', commandKey: 'child-command', parentId: 'wp2', scope: '文件夹' })];
+const treeGroups = groupMenus([wp1, wp2, ...children, entry('baidu', { source: '百度网盘', commandKey: 'baidu-command' })]);
+const tree = softwareMenus(treeGroups);
+assert.equal(tree.length, 2);
+const wps = tree.find(s => s.title === 'WPS Office');
+assert.equal(wps.commands.length, 2);
+assert.equal(wps.registrations, 4);
+const childGroup = wps.commands.find(g => g.entries[0].parentId);
+assert.deepEqual(childGroup.entries.map(e => e.id), ['wc1', 'wc2']);
+assert.equal(menuTrail(childGroup, treeGroups), '图片工具');
+assert.equal(softwareMenus([childGroup], treeGroups)[0].title, 'WPS Office');
+assert.equal(softwareMenus(groupMenus([entry('a', { commandKey: 'different-a' }), entry('b', { commandKey: 'different-b' })]))[0].commands.length, 2);
+const loop = entry('cycle', { parentId: 'cycle' });
+assert.equal(softwareMenus(groupMenus([loop])).length, 1);
+console.log('PASS software -> command -> positions keeps submenu ownership, canonical parents and distinct same-name commands');

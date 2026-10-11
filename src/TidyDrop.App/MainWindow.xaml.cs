@@ -380,9 +380,11 @@ public partial class MainWindow : Window
             if (smokeTest)
             {
                 if (systemMenus.Count == 0) systemMenus = [
-                    new("fixture-menu", "测试软件菜单", "界面检查", "所有文件", "静态命令", true, true, false, "模拟项目，不修改系统。", "fixture-command", "*"),
-                    new("fixture-menu-duplicate", "测试软件菜单", "界面检查", "所有文件", "静态命令", true, true, false, "模拟重复位置。", "fixture-command", "*"),
-                    new("fixture-menu-type", "测试软件菜单", "界面检查", "特定类型 · TXT 文件", "静态命令", true, true, false, "模拟文件类型。", "fixture-command", "fixture.type")];
+                    new("fixture-menu", "图片转换", "WPS Office", "所有文件", "静态命令", true, true, false, "模拟项目，不修改系统。", "fixture-command", "*"),
+                    new("fixture-menu-folder", "图片转换", "WPS Office", "文件夹", "静态命令", true, true, false, "模拟文件夹位置。", "fixture-command", "Directory"),
+                    new("fixture-menu-desktop", "图片转换", "WPS Office", "桌面空白处", "静态命令", true, true, false, "模拟桌面位置。", "fixture-command", "DesktopBackground"),
+                    new("fixture-other-command", "图片转换", "WPS Office", "特定类型 · PNG 文件", "静态命令", true, false, false, "同名的另一命令，仅查看。", "different-command", "fixture.type"),
+                    new("fixture-baidu", "上传到百度网盘", "百度网盘", "文件夹", "扩展组件", true, false, false, "模拟只读项目，不修改系统。", "baidu-command", "Directory")];
                 return;
             }
             var registry = Task.Run(menuRegistry.Scan);
@@ -486,16 +488,35 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"拖入后自动整理\"]').click()");
             await WaitUntil(() => Task.FromResult(!settings.AutoOrganize));
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"打开右键菜单管理\"]').click()");
-            await CheckScript("document.querySelector('#menu-title')?.textContent === '右键菜单管理' && document.querySelector('.system-menu-row') !== null");
-            await CheckScript("document.querySelectorAll('.system-menu-row').length === 1");
-            await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('.menu-navigation button')).find(b => b.textContent === '按软件查看').click()");
-            await Browser.ExecuteScriptAsync("document.querySelector('.menu-detail-toggle').click()");
+            await CheckScript("document.querySelector('#menu-title')?.textContent === '右键菜单管理' && document.querySelectorAll('.menu-software-toggle').length === 2");
+            await CheckScript("document.querySelectorAll('.menu-command-toggle').length === 0 && document.querySelectorAll('.menu-location-row').length === 0");
+            await Task.Delay(350);
+            using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-menu-software.png")))
+                await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"展开 WPS Office 的菜单\"]').click()");
+            await CheckScript("document.querySelectorAll('.menu-command-toggle').length === 2 && document.querySelectorAll('.menu-location-row').length === 0");
+            await Browser.ExecuteScriptAsync("document.querySelector('.menu-command-toggle').click()");
             await CheckScript("document.querySelectorAll('.menu-location-row').length === 3");
-            await Browser.ExecuteScriptAsync("document.querySelector('.system-menu-row [role=switch]').click()");
-            await CheckScript("document.querySelector('.system-menu-row [role=switch]')?.getAttribute('aria-checked') === 'false'");
-            if (systemMenus.Any(e => e.Enabled || !e.Managed)) throw new IOException("Grouped toggle did not cover all fixture positions.");
+            await Browser.ExecuteScriptAsync("document.querySelector('.menu-position-toggle').click()");
+            await CheckScript("document.querySelector('.menu-position-toggle')?.getAttribute('aria-checked') === 'false' && !document.querySelector('.menu-position-toggle').disabled");
+            if (systemMenus.Single(e => e.Id == "fixture-menu").Enabled || systemMenus.Where(e => e.Id != "fixture-menu").Any(e => !e.Enabled))
+                throw new IOException("Position toggle affected a different position or command.");
+            await Browser.ExecuteScriptAsync("document.querySelector('.menu-position-toggle').click()");
+            await CheckScript("document.querySelector('.menu-position-toggle')?.getAttribute('aria-checked') === 'true' && !document.querySelector('.menu-position-toggle').disabled");
+            await Browser.ExecuteScriptAsync("document.querySelector('.menu-all-toggle').click()");
+            await CheckScript("document.querySelector('.menu-all-toggle')?.getAttribute('aria-checked') === 'false' && !document.querySelector('.menu-all-toggle').disabled");
+            if (systemMenus.Where(e => e.CommandKey == "fixture-command").Any(e => e.Enabled || !e.Managed)
+                || systemMenus.Where(e => e.CommandKey != "fixture-command").Any(e => !e.Enabled || e.Managed))
+                throw new IOException("Grouped toggle changed a same-name independent command or another software.");
             await Browser.ExecuteScriptAsync("document.querySelector('.menu-restore').click()");
-            await CheckScript("document.querySelector('.system-menu-row [role=switch]')?.getAttribute('aria-checked') === 'true'");
+            await CheckScript("document.querySelector('.menu-all-toggle')?.getAttribute('aria-checked') === 'true' && !document.querySelector('.menu-all-toggle').disabled");
+            await Browser.ExecuteScriptAsync("(()=>{const input=document.querySelector('[aria-label=\"搜索右键菜单\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'桌面');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            await CheckScript("document.querySelectorAll('.menu-software-toggle').length === 1 && document.querySelectorAll('.menu-command-toggle').length === 1 && document.querySelectorAll('.menu-location-row').length === 3");
+            await Browser.ExecuteScriptAsync("(()=>{const input=document.querySelector('[aria-label=\"搜索右键菜单\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            await CheckScript("document.querySelectorAll('.menu-software-toggle').length === 2 && document.querySelectorAll('.menu-command-toggle').length === 2");
+            await Browser.ExecuteScriptAsync("document.querySelector('.menu-section-heading button').click()");
+            await CheckScript("document.querySelectorAll('.menu-position-toggle:not(:disabled)').length === 3 && document.querySelector('.menu-software-toggle[aria-expanded=true]') !== null");
+            await Task.Delay(350);
             using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-menu-manager.png")))
                 await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"添加复制路径菜单\"]').click()");
@@ -589,10 +610,21 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '撤销').click()");
             await WaitUntil(() => Task.FromResult(!busy && history.All(entry => entry.State == "已撤销")));
             if (File.ReadAllText(source) != "React bridge check 中文") throw new IOException("Bridge undo check failed.");
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS context menu settings bridge (simulated installation)\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\nPASS animated view switching, rapid clicks, reduced motion, and fallback\n");
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS context menu settings bridge (simulated installation)\nPASS three-level software menus, independent positions, same-name identity and complete search results\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\nPASS animated view switching, rapid clicks, reduced motion, and fallback\n");
             Application.Current.Shutdown(0);
         }
-        catch (Exception ex) { Fail(ex); }
+        catch (Exception ex)
+        {
+            try
+            {
+                var ui = await Browser.ExecuteScriptAsync("JSON.stringify({text:document.querySelector('.menu-manager')?.innerText,switches:Array.from(document.querySelectorAll('.menu-manager [role=switch]')).map(b=>({label:b.getAttribute('aria-label'),checked:b.getAttribute('aria-checked'),disabled:b.disabled}))})");
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-menu-diagnostics.json"), JsonSerializer.Serialize(new { busy, menusLoading, message, ui }));
+                using var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-error.png"));
+                await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+            }
+            catch { }
+            Fail(ex);
+        }
     }
 
     private void AddLibrarySample(DateTime date, string category, string name)
