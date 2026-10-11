@@ -140,7 +140,7 @@ public partial class MainWindow : Window
                     {
                         await ExplorerNavigation.RevealAsync(archive.Path);
                     }
-                    else Notify("这个项目已被移走，请点击「更新清单」。", true);
+                    else Notify("这个项目已被移走，请点击「刷新」。", true);
                     break;
                 case "saveSettings":
                     var requested = root.GetProperty("settings");
@@ -282,7 +282,7 @@ public partial class MainWindow : Window
     private async Task RefreshLibrary(bool rebuild = false)
     {
         busy = true;
-        if (rebuild) { message = "正在核对归档目录，更新材料清单…"; isError = false; }
+        if (rebuild) { message = "正在刷新材料…"; isError = false; }
         SendState();
         var records = history.ToArray();
         try
@@ -290,7 +290,7 @@ public partial class MainWindow : Window
             var loaded = await Task.Run(() => catalog.Load(records, rebuild));
             library = loaded;
             libraryRoot = settings.RootFolder;
-            if (rebuild) message = $"材料清单已更新，共 {library.Count} 份材料。";
+            if (rebuild) message = $"已刷新，共 {library.Count} 份材料。";
         }
         catch (Exception ex)
         {
@@ -367,7 +367,7 @@ public partial class MainWindow : Window
             AddLibrarySample(DateTime.Today.AddDays(-1), "文档", "阶段计划.txt");
             AddLibrarySample(DateTime.Today.AddDays(-1), "图片", "设计参考.png");
             AddLibrarySample(DateTime.Today.AddMonths(-1), "压缩包", "历史材料.zip");
-            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"更新材料清单\"]').click()");
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"刷新\"]').click()");
             await CheckScript("document.querySelectorAll('.archive-row').length === 6 && document.querySelectorAll('.timeline-day').length === 3");
             await WaitUntil(() => Task.FromResult(!busy));
             if (new ArchiveCatalog(settings).Load(history).Count != 6) throw new IOException("Manual catalog update was not persisted.");
