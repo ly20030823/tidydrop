@@ -26,6 +26,8 @@ public partial class MainWindow : Window
     private bool initialized;
     private bool isError;
     private string message = "";
+    private ContextMenuStatus contextMenu = ShellIntegration.InitialStatus();
+    private int contextMenuRevision;
     private readonly bool smokeTest;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -41,6 +43,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         if (smokeTest)
         {
+            contextMenu = new(true, true, false, true, "界面检查用状态，未修改系统菜单");
             WindowStartupLocation = WindowStartupLocation.Manual;
             Left = -20000;
             Top = -20000;
@@ -98,6 +101,7 @@ public partial class MainWindow : Window
                 ready = true;
                 LoadingText.Visibility = Visibility.Collapsed;
                 await RefreshLibrary();
+                if (!smokeTest) _ = UpdateContextMenuStatus();
                 if (smokeTest) _ = CheckWebInterface();
                 else await ProcessQueued();
                 return;
@@ -133,6 +137,9 @@ public partial class MainWindow : Window
                     if (sourcePicker.ShowDialog(this) == true) HandleIncomingPaths([sourcePicker.FolderName]);
                     break;
                 case "refreshLibrary": await RefreshLibrary(rebuild: true); await ProcessQueued(); break;
+                case "contextMenuStatus": await UpdateContextMenuStatus(); break;
+                case "installContextMenu": await ChangeContextMenu(true); break;
+                case "removeContextMenu": await ChangeContextMenu(false); break;
                 case "reveal":
                     var archiveId = root.GetProperty("id").GetString();
                     var archive = library.FirstOrDefault(item => item.Id == archiveId);
@@ -275,7 +282,7 @@ public partial class MainWindow : Window
         Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
         {
             type = "state",
-            state = new { settings, items, history, library, busy, message, isError, pendingCount = queued.Count }
+            state = new { settings, items, history, library, contextMenu, busy, message, isError, pendingCount = queued.Count }
         }, JsonOptions));
     }
 
@@ -301,9 +308,50 @@ public partial class MainWindow : Window
         finally { busy = false; SendState(); }
     }
 
+    private async Task UpdateContextMenuStatus()
+    {
+        var revision = ++contextMenuRevision;
+        try
+        {
+            var status = await RunContextMenuAction("status");
+            if (revision == contextMenuRevision) contextMenu = status;
+        }
+        catch (Exception ex)
+        {
+            if (revision == contextMenuRevision) contextMenu = ShellIntegration.InitialStatus() with { Checked = true, Detail = "菜单状态未读取：" + ex.Message };
+        }
+        SendState();
+    }
+
+    private async Task ChangeContextMenu(bool install)
+    {
+        if (!smokeTest && install && ShellIntegration.NeedsLocalTrust()
+            && MessageBox.Show(this, "此个人开发版需要 Windows 信任随附的归序签名，才能添加一级右键菜单。\n\n继续会将这枚公开证书加入当前用户的「受信任人」证书库，并注册归序菜单组件。移除菜单时，会清理归序新增的信任。\n\n是否信任归序签名并添加菜单？", "添加复制路径菜单", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        ++contextMenuRevision;
+        busy = true; isError = false;
+        message = install ? "正在添加右键菜单…" : "正在移除右键菜单…";
+        SendState();
+        try
+        {
+            contextMenu = await RunContextMenuAction(install ? "install" : "remove");
+            message = install ? "已添加「复制文件路径」。在文件或文件夹上右键即可使用，无需打开归序。" : "归序的右键菜单已移除。";
+        }
+        catch (Exception ex)
+        {
+            message = "右键菜单操作未完成：" + ex.Message; isError = true;
+            await UpdateContextMenuStatus();
+        }
+        finally { busy = false; SendState(); await ProcessQueued(); }
+    }
+
+    private Task<ContextMenuStatus> RunContextMenuAction(string action) => smokeTest
+        ? Task.FromResult(contextMenu with { Installed = action == "status" ? contextMenu.Installed : action == "install", Checked = true })
+        : ShellIntegration.RunAsync(action);
+
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (busy) { e.Cancel = true; Notify("正在处理文件，完成后即可关闭。"); return; }
+        ready = false;
         Browser.Dispose();
     }
 
@@ -342,6 +390,10 @@ public partial class MainWindow : Window
             await WaitUntil(() => Task.FromResult(settings.AutoOrganize));
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"拖入后自动整理\"]').click()");
             await WaitUntil(() => Task.FromResult(!settings.AutoOrganize));
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"添加复制路径菜单\"]').click()");
+            await CheckScript("document.querySelector('[aria-label=\"移除复制路径菜单\"]') !== null");
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"移除复制路径菜单\"]').click()");
+            await CheckScript("document.querySelector('[aria-label=\"添加复制路径菜单\"]') !== null");
             var source = Path.Combine(testDirectory, "桥接 检查, 终稿.txt");
             File.WriteAllText(source, "React bridge check 中文");
             DesktopShortcut.Create(testDirectory);
@@ -423,7 +475,7 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '撤销').click()");
             await WaitUntil(() => Task.FromResult(!busy && history.All(entry => entry.State == "已撤销")));
             if (File.ReadAllText(source) != "React bridge check 中文") throw new IOException("Bridge undo check failed.");
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\nPASS animated view switching, rapid clicks, reduced motion, and fallback\n");
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS context menu settings bridge (simulated installation)\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\nPASS animated view switching, rapid clicks, reduced motion, and fallback\n");
             Application.Current.Shutdown(0);
         }
         catch (Exception ex) { Fail(ex); }

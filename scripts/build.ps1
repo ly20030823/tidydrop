@@ -1,6 +1,9 @@
 $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
+    & ./scripts/build-shell.ps1
+    & ./scripts/sign-shell.ps1
+    & ./scripts/check-shell.ps1
     Push-Location frontend
     try {
         pnpm install --frozen-lockfile

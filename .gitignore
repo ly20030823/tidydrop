@@ -5,3 +5,5 @@ artifacts/
 .vs/
 node_modules/
 frontend/dist/
+*.pfx
+*.p12

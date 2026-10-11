@@ -6,12 +6,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>TidyDrop</AssemblyName>
-    <Version>0.5.2</Version>
+    <Version>0.6.0</Version>
     <Product>归序</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/TidyDrop.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../TidyDrop.Core/TidyDrop.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <Content Include="../../artifacts/shell/TidyDrop.Shell.dll;../../artifacts/shell/TidyDrop.CopyPath.msix;../../artifacts/shell/TidyDrop.CopyPath.cer;../../artifacts/shell/context-menu.ps1" Condition="Exists('../../artifacts/shell/TidyDrop.Shell.dll')"><Link>Shell/%(Filename)%(Extension)</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></Content>
+    <Content Include="../../artifacts/shell/Assets/Logo.png" Condition="Exists('../../artifacts/shell/Assets/Logo.png')"><Link>Shell/Assets/Logo.png</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></Content>
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <Content Include="../../frontend/dist/**/*"><Link>Web/%(RecursiveDir)%(Filename)%(Extension)</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></Content>

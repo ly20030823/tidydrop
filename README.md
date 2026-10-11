@@ -12,6 +12,7 @@
 - **日期时间线 / 类型卡片**：日期视图按年月和收纳日回顾，类型视图以分类卡片显示材料数量。日期和类型可以组合筛选，切换时左右滑动，并保留筛选和搜索条件；系统开启减少动态效果时直接切换。
 - **打开位置**：打开材料实际所在的资源管理器文件夹，并选中它；支持中文、空格和逗号名称。文件夹项目同样打开其所在位置。
 - **文件夹整包收纳**：保留子目录、文件和空文件夹，归入「文件夹」分类，不拆散项目结构。
+- **一级右键菜单复制路径**：Windows 11 x64 下可在设置中添加「复制文件路径」。支持文件、文件夹与多选，路径不带引号，不用展开「显示更多选项」，不必打开归序。可随时移除。[使用与本地签名说明](docs/context-menu.md)。
 - **一份材料，一份存储**：日期与类型是查看同一批材料的两种方式，不会为两个视图重复复制文件。
 - **持久化材料清单**：正常启动直接读取已保存的清单；收纳和撤销时更新条目，包含软件关闭时的桌面后台收纳。首次迁移、清单恢复和手动「刷新」时才扫描目录。
 - **可预览、可撤销**：关闭自动整理后先预览去向；整理记录保存原位置和目标位置，可以恢复到原处。
@@ -92,11 +93,14 @@
 
 ## 开发与构建
 
-开发环境：.NET 9 SDK、Node.js 24+、pnpm 11。微软 WebView2 SDK 使用 `vendor/nuget/` 中的官方包；前端依赖由 `frontend/pnpm-lock.yaml` 固定。
+开发环境：.NET 9 SDK、Node.js 24+、pnpm 11、Visual Studio 2022 的 C++ 桌面开发工具与 Windows 11 SDK。微软 WebView2 SDK 使用 `vendor/nuget/` 中的官方包；前端依赖由 `frontend/pnpm-lock.yaml` 固定。
 
 ```powershell
 git clone https://github.com/ly20030823/tidydrop.git
 cd tidydrop
+./scripts/build-shell.ps1
+./scripts/sign-shell.ps1
+./scripts/check-shell.ps1
 cd frontend
 pnpm install --frozen-lockfile
 pnpm build
@@ -105,13 +109,15 @@ dotnet run --project tests/TidyDrop.Checks/TidyDrop.Checks.csproj -- artifacts/c
 dotnet publish src/TidyDrop.App/TidyDrop.App.csproj -c Release --no-self-contained -o artifacts/app
 ```
 
-运行 `artifacts/app/TidyDrop.exe`。分发时需要整个输出目录，不能只复制 exe。`scripts/build.ps1` 可以执行界面构建、核心检查和发布，并附带第三方许可文件。
+运行 `artifacts/app/TidyDrop.exe`。分发时需要整个输出目录，不能只复制 exe。`scripts/build.ps1` 可以完成菜单组件构建、本地签名、复制路径检查、界面构建、核心检查和发布，并附带第三方许可文件。签名私钥不导出；当前个人开发版安装菜单时需要明确授权当前用户的本地签名信任，详见 [右键菜单说明](docs/context-menu.md)。
 
 ```text
 frontend/                  React + TypeScript 界面
 src/TidyDrop.Core/          规划、移动、校验、撤销与归档空间
 src/TidyDrop.App/           Windows 外壳、桌面快捷方式、后台入口与本地桥接
+src/TidyDrop.Shell/         Windows 11 一级右键菜单原生组件与身份包
 tests/TidyDrop.Checks/      隔离目录中的文件处理检查
+tests/TidyDrop.ShellChecks/ 路径复制、剪贴板与 COM 检查
 docs/images/               界面截图（测试材料）
 vendor/                    WebView2 SDK 与来源说明
 ```

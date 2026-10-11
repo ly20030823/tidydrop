@@ -137,6 +137,8 @@ th:last-child{width:27%}
 .setting-row>div{flex:1;min-width:0}
 .setting-row strong{font-size:12px;font-weight:550}
 .setting-row p{font-size:10px;color:var(--muted);margin:7px 0 0;line-height:1.6;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.context-menu-setting p{white-space:normal}
+.menu-signature-note{font-size:10px;color:var(--muted);line-height:1.7;margin:16px 0 0}
 .toggle{width:35px;height:20px;flex-shrink:0;padding:3px;border-radius:12px;background:#d7d9d9;transition:background .18s}
 .toggle span{display:block;height:14px;width:14px;background:var(--surface);border-radius:50%;box-shadow:0 1px 4px #0001;transition:transform .18s}
 .toggle.on{background:var(--accent)}
