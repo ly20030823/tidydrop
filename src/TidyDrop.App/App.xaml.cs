@@ -16,6 +16,22 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.SequenceEqual(["--menu-read-check"]))
+        {
+            try
+            {
+                var entries = Task.Run(async () => {
+                    var found = new MenuService().Scan();
+                    var packaged = await ShellIntegration.InventoryAsync(); found.AddRange(packaged.Entries);
+                    return await DynamicMenuProbe.Enrich(found);
+                }).GetAwaiter().GetResult();
+                Console.Write(JsonSerializer.Serialize(entries)); Shutdown(0);
+            }
+            catch { Shutdown(1); }
+            return;
+        }
+        if (e.Args.FirstOrDefault() == "--menu-probe") { Shutdown(DynamicMenuProbe.RunHelper(e.Args)); return; }
+        if (e.Args.FirstOrDefault() == "--menu-template-change") { Shutdown(MenuService.RunTemplateHelper(e.Args)); return; }
         if (e.Args.SequenceEqual(["--shortcut-check"]))
         {
             var fixture = Path.Combine(AppContext.BaseDirectory, "shortcut-check");

@@ -49,8 +49,8 @@ function Get-PackagedMenus {
                 foreach ($item in $extension.SelectNodes(".//*[local-name()='ItemType']")) {
                     foreach ($verb in $item.SelectNodes("./*[local-name()='Verb']")) {
                         $type = [string]$item.Type
-                        $scope = switch ($type) { '*' {'所有文件'} 'Directory' {'文件夹'} 'Directory\Background' {'空白处'} 'DesktopBackground' {'空白处'} 'Drive' {'磁盘'} default {'特定类型 · ' + $type} }
-                        $entries += @{ id=('package:' + $package.PackageFullName + ':' + $type + ':' + $verb.Id); title=[string]$verb.Id; source=[string]$package.Name; scope=$scope; kind='一级菜单'; enabled=$true; canToggle=$false; managed=$false; detail='已注册的一级菜单组件；显示与开关由所属软件管理，可能包含多个命令。' }
+                        $scope = switch ($type) { '*' {'所有文件'} 'Directory' {'文件夹'} 'Directory\Background' {'文件夹空白处'} 'DesktopBackground' {'桌面空白处'} 'Drive' {'磁盘'} default {'特定类型 · ' + $type} }
+                        $entries += @{ id=('package:' + $package.PackageFullName + ':' + $type + ':' + $verb.Id); title=[string]$verb.Id; source=[string]$package.Name; scope=$scope; kind='一级菜单'; enabled=$true; canToggle=$false; managed=$false; detail='已注册的一级菜单组件；当前仅查看，请在所属软件设置中调整。'; commandKey=('package:'+$package.PackageFullName+':'+$verb.Clsid+':'+$verb.Id); location=$type; category='context'; rawName=[string]$verb.Id; registration=('应用包 '+$package.PackageFullName+' / '+$type+' / '+$verb.Id); state='已注册 · 条件显示'; clsid=[string]$verb.Clsid; verb=[string]$verb.Id }
                     }
                 }
             }

@@ -28,9 +28,13 @@ public partial class MainWindow : Window
     private string message = "";
     private ContextMenuStatus contextMenu = ShellIntegration.InitialStatus();
     private int contextMenuRevision;
-    private readonly MenuRegistry menuRegistry = new();
+    private readonly MenuService menuRegistry = new();
+    private MenuAnalysis? menuAnalysis;
     private List<MenuEntry> systemMenus = [];
     private bool menusLoading;
+    private bool menusNaming;
+    private int menusRevision;
+    private CancellationTokenSource? menuNamesCancellation;
     private string menusDetail = "";
     private readonly bool smokeTest;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -145,7 +149,20 @@ public partial class MainWindow : Window
                 case "installContextMenu": await ChangeContextMenu(true); break;
                 case "removeContextMenu": await ChangeContextMenu(false); break;
                 case "repairContextMenu": await ChangeContextMenu(true, true); break;
-                case "systemMenus": await RefreshSystemMenus(); break;
+                case "systemMenus": DynamicMenuProbe.ClearCache(); await RefreshSystemMenus(); break;
+                case "analyzeMenuFile":
+                    var fileDialog = new OpenFileDialog { Title = "选择需要分析右键菜单的文件", CheckFileExists = true };
+                    if (fileDialog.ShowDialog(this) == true) { menuAnalysis = MenuService.Analyze(fileDialog.FileName); SendState(); }
+                    break;
+                case "analyzeMenuFolder":
+                    var folderDialog = new OpenFolderDialog { Title = "选择需要分析右键菜单的文件夹" };
+                    if (folderDialog.ShowDialog(this) == true) { menuAnalysis = MenuService.Analyze(folderDialog.FolderName); SendState(); }
+                    break;
+                case "clearMenuAnalysis": menuAnalysis = null; SendState(); break;
+                case "copyMenuRegistration":
+                    var registration = systemMenus.FirstOrDefault(e => e.Id == root.GetProperty("id").GetString())?.Registration;
+                    if (!string.IsNullOrWhiteSpace(registration)) { Clipboard.SetText(registration); message = "菜单来源位置已复制。"; SendState(); }
+                    break;
                 case "toggleSystemMenu": await ToggleSystemMenu(root.GetProperty("id").GetString() ?? "", root.GetProperty("enabled").GetBoolean()); break;
                 case "toggleSystemMenus": await ToggleSystemMenus(root.GetProperty("ids").EnumerateArray().Select(e => e.GetString() ?? "").Distinct().ToArray(), root.GetProperty("enabled").GetBoolean()); break;
                 case "restoreSystemMenus": await RestoreSystemMenus(); break;
@@ -291,7 +308,7 @@ public partial class MainWindow : Window
         Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
         {
             type = "state",
-            state = new { settings, items, history, library, contextMenu, systemMenus, menusLoading, menusDetail, busy, message, isError, pendingCount = queued.Count }
+            state = new { settings, items, history, library, contextMenu, systemMenus, menuAnalysis, menusLoading, menusNaming, menusDetail, busy, message, isError, pendingCount = queued.Count }
         }, JsonOptions));
     }
 
@@ -360,15 +377,18 @@ public partial class MainWindow : Window
     private async Task RefreshSystemMenus()
     {
         if (menusLoading) return;
+        menuNamesCancellation?.Cancel();
+        var revision = ++menusRevision;
+        menusNaming = false;
         menusLoading = true; menusDetail = ""; SendState();
         try
         {
             if (smokeTest)
             {
                 if (systemMenus.Count == 0) systemMenus = [
-                    new("fixture-menu", "测试软件菜单", "界面检查", "所有文件", "更多选项", true, true, false, "模拟项目，不修改系统。"),
-                    new("fixture-menu-duplicate", "测试软件菜单", "界面检查", "所有文件", "更多选项", true, true, false, "模拟重复位置。"),
-                    new("fixture-menu-type", "测试软件菜单", "界面检查", "特定类型 · TXT 文件", "更多选项", true, true, false, "模拟文件类型。")];
+                    new("fixture-menu", "测试软件菜单", "界面检查", "所有文件", "静态命令", true, true, false, "模拟项目，不修改系统。", "fixture-command", "*"),
+                    new("fixture-menu-duplicate", "测试软件菜单", "界面检查", "所有文件", "静态命令", true, true, false, "模拟重复位置。", "fixture-command", "*"),
+                    new("fixture-menu-type", "测试软件菜单", "界面检查", "特定类型 · TXT 文件", "静态命令", true, true, false, "模拟文件类型。", "fixture-command", "fixture.type")];
                 return;
             }
             var registry = Task.Run(menuRegistry.Scan);
@@ -380,6 +400,25 @@ public partial class MainWindow : Window
             catch (Exception ex) { menusDetail += "一级菜单暂未读取：" + ex.Message; }
         }
         finally { menusLoading = false; SendState(); }
+        if (!smokeTest)
+        {
+            menuNamesCancellation = new CancellationTokenSource();
+            _ = UpdateMenuNames(systemMenus.ToList(), revision, menuNamesCancellation.Token);
+        }
+    }
+
+    private async Task UpdateMenuNames(List<MenuEntry> entries, int revision, CancellationToken cancellation)
+    {
+        menusNaming = true; SendState();
+        try
+        {
+            var named = await DynamicMenuProbe.Enrich(entries, cancellation);
+            // Never publish an old snapshot over a refresh or a menu change.
+            if (revision == menusRevision && !busy && !cancellation.IsCancellationRequested) systemMenus = named;
+        }
+        catch (OperationCanceledException) { }
+        catch { /* Keep the usable registration list and its distinguishable fallback names. */ }
+        finally { if (revision == menusRevision) { menusNaming = false; SendState(); } }
     }
 
     private async Task ToggleSystemMenu(string id, bool enabled)
@@ -473,8 +512,9 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"打开右键菜单管理\"]').click()");
             await CheckScript("document.querySelector('#menu-title')?.textContent === '右键菜单管理' && document.querySelector('.system-menu-row') !== null");
             await CheckScript("document.querySelectorAll('.system-menu-row').length === 1");
+            await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('.menu-navigation button')).find(b => b.textContent === '按软件查看').click()");
             await Browser.ExecuteScriptAsync("document.querySelector('.menu-detail-toggle').click()");
-            await CheckScript("document.querySelectorAll('.menu-location-row').length === 2");
+            await CheckScript("document.querySelectorAll('.menu-location-row').length === 3");
             await Browser.ExecuteScriptAsync("document.querySelector('.system-menu-row [role=switch]').click()");
             await CheckScript("document.querySelector('.system-menu-row [role=switch]')?.getAttribute('aria-checked') === 'false'");
             if (systemMenus.Any(e => e.Enabled || !e.Managed)) throw new IOException("Grouped toggle did not cover all fixture positions.");
@@ -484,7 +524,9 @@ public partial class MainWindow : Window
                 await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"添加复制路径菜单\"]').click()");
             await CheckScript("document.querySelector('[aria-label=\"移除复制路径菜单\"]') !== null");
+            var beforeRepair = contextMenuRevision;
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('修复归序菜单')).click()");
+            await WaitUntil(() => Task.FromResult(contextMenuRevision > beforeRepair && !busy));
             await CheckScript("document.querySelector('[aria-label=\"移除复制路径菜单\"]') !== null");
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"移除复制路径菜单\"]').click()");
             await CheckScript("document.querySelector('[aria-label=\"添加复制路径菜单\"]') !== null");

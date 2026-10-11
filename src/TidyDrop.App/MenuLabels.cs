@@ -32,20 +32,19 @@ internal static partial class MenuLabels
     public static string Command(string value, string software, bool packaged = false)
     {
         var lower = value.ToLowerInvariant();
+        var common = lower switch { "open" => "打开", "openas" => "打开方式", "edit" => "编辑", "print" => "打印", "printto" => "打印到", "runas" => "以管理员身份运行", "properties" => "属性", "explore" => "浏览", "opennewwindow" => "在新窗口中打开", "play" => "播放", "preview" => "预览", _ => "" };
+        if (common.Length > 0) return common;
         if (lower.Contains("askm365copilot")) return "询问 Copilot";
         if (lower.Contains("openprojectincodex")) return "在 Codex 中打开文件夹";
         if (lower.Contains("powerrename")) return "PowerRename 批量重命名";
         if (lower.Contains("filelocksmith")) return "查看占用文件的进程";
-        if (software == "QQ" && packaged) return "通过 QQ 发送到";
-        if (software == "Bandizip" && packaged) return "Bandizip 菜单";
-        if (software == "Clipchamp" && packaged) return "使用 Clipchamp 编辑";
-        if (software == "Microsoft 照片" && packaged) return "使用照片编辑";
-        if (software == "Microsoft 画图" && packaged) return "使用画图编辑";
-        if (software == "记事本" && packaged) return "在记事本中编辑";
-        if (packaged || Guid.TryParse(value, out _) || value.StartsWith('@') || value.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)
-            || TechnicalName().IsMatch(value)) return software == "未识别的软件" ? "软件菜单组件" : software + " 菜单";
+        if (packaged) return software + " · " + value;
+        if (Guid.TryParse(value, out _) || value.StartsWith('@') || value.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)
+            || TechnicalName().IsMatch(value)) return "菜单组件 · " + value;
         return value;
     }
+    public static string Component(string value, string software, string clsid)
+        => Guid.TryParse(value, out _) || TechnicalName().IsMatch(value) ? software + " 右键菜单扩展 · " + clsid.Trim('{', '}')[..8] : value;
     public static string FileType(string value)
     {
         value = value.Replace(@"SystemFileAssociations\", "", StringComparison.OrdinalIgnoreCase);

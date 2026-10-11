@@ -10,6 +10,7 @@
 #include <string>
 #include <stdexcept>
 #include <vector>
+#include <functional>
 using Microsoft::WRL::ComPtr;
 static const CLSID CopyPathClsid = {0x62f68386, 0x2117, 0x4d94, {0x94, 0x05, 0xc9, 0xb7, 0x92, 0xbe, 0x8e, 0xeb}};
 static void Check(HRESULT hr) { if (FAILED(hr)) { char text[32]; sprintf_s(text, "HRESULT 0x%08lX", static_cast<unsigned long>(hr)); throw std::runtime_error(text); } }
@@ -77,7 +78,7 @@ public:
 int wmain(int argc, wchar_t** argv) {
     if (argc < 3) return 2;
     Check(OleInitialize(nullptr));
-    if (argc > 3 && std::wstring(argv[3]) == L"--find-verb") {
+    if (argc > 3 && (std::wstring(argv[3]) == L"--find-verb" || std::wstring(argv[3]) == L"--find-menu-title" || std::wstring(argv[3]) == L"--find-background-title")) {
         int result = 3;
         PIDLIST_ABSOLUTE id = nullptr;
         HMENU menu = CreatePopupMenu();
@@ -87,13 +88,40 @@ int wmain(int argc, wchar_t** argv) {
             PCUITEMID_CHILD child = nullptr;
             Check(SHBindToParent(id, IID_PPV_ARGS(&parent), &child));
             ComPtr<IContextMenu> context;
-            Check(parent->GetUIObjectOf(nullptr, 1, &child, IID_IContextMenu, nullptr, reinterpret_cast<void**>(context.GetAddressOf())));
+            const auto mode = std::wstring(argv[3]);
+            if (mode == L"--find-background-title") {
+                ComPtr<IShellItem> folder;
+                Check(SHCreateItemFromParsingName(argv[1], nullptr, IID_PPV_ARGS(&folder)));
+                ComPtr<IShellFolder> object;
+                Check(folder->BindToHandler(nullptr, BHID_SFObject, IID_PPV_ARGS(&object)));
+                Check(object->CreateViewObject(nullptr, IID_IContextMenu, reinterpret_cast<void**>(context.GetAddressOf())));
+            } else Check(parent->GetUIObjectOf(nullptr, 1, &child, IID_IContextMenu, nullptr, reinterpret_cast<void**>(context.GetAddressOf())));
             const auto hr = context->QueryContextMenu(menu, 0, 1, 0x7fff, CMF_NORMAL);
             Check(hr);
             const auto count = static_cast<UINT>(HRESULT_CODE(hr));
-            for (UINT command = 0; command < count; ++command) {
+            for (UINT command = 0; mode == L"--find-verb" && command < count; ++command) {
                 wchar_t verb[512] = {};
                 if (SUCCEEDED(context->GetCommandString(command, GCS_VERBW, nullptr, reinterpret_cast<LPSTR>(verb), 512)) && _wcsicmp(verb, argv[2]) == 0) { result = 0; break; }
+            }
+            if (mode != L"--find-verb") {
+                ComPtr<IContextMenu2> messages; context.As(&messages);
+                std::function<bool(HMENU, int)> find = [&](HMENU current, int depth) {
+                    if (depth > 5) return false;
+                    const int length = GetMenuItemCount(current);
+                    for (int index = 0; index < length; ++index) {
+                        wchar_t text[512] = {};
+                        MENUITEMINFOW item{}; item.cbSize = sizeof(item); item.fMask = MIIM_STRING | MIIM_SUBMENU; item.dwTypeData = text; item.cch = 511;
+                        if (!GetMenuItemInfoW(current, static_cast<UINT>(index), TRUE, &item)) continue;
+                        std::wstring label; for (const auto letter : std::wstring(text)) if (letter != L'&') label += letter;
+                        if (label == argv[2]) return true;
+                        if (item.hSubMenu) {
+                            if (messages) messages->HandleMenuMsg(WM_INITMENUPOPUP, reinterpret_cast<WPARAM>(item.hSubMenu), MAKELPARAM(index, FALSE));
+                            if (find(item.hSubMenu, depth + 1)) return true;
+                        }
+                    }
+                    return false;
+                };
+                if (find(menu, 0)) result = 0;
             }
         } catch (const std::exception& ex) { std::cerr << ex.what() << "\n"; result = 1; }
         if (menu) DestroyMenu(menu);

@@ -1,71 +1,61 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, FileText, LoaderCircle, RotateCcw, Search, Settings2, X } from 'lucide-react';
+import { Check, ChevronDown, FileText, FolderOpen, LoaderCircle, RotateCcw, Search, Settings2, X } from 'lucide-react';
 import './menu-manager.css';
-import { groupMenus, scopeSummary } from './MenuGroups';
+import { groupMenus, inScene, scopeSummary, withParents } from './MenuGroups';
 import type { MenuGroup } from './MenuGroups';
-export type MenuEntry = { id: string; title: string; source: string; scope: string; kind: string; enabled: boolean; canToggle: boolean; managed: boolean; detail: string };
+export type MenuEntry = { id: string; title: string; source: string; scope: string; kind: string; enabled: boolean; canToggle: boolean; managed: boolean; detail: string;
+  commandKey?: string; location?: string; category?: string; parentId?: string; rawName?: string; registration?: string; state?: string; clsid?: string; verb?: string };
+export type MenuAnalysis = { name: string; locations: string[]; detail: string } | null;
 type ContextMenu = { supported: boolean; available: boolean; installed: boolean; checked: boolean; detail: string };
-type Props = { entries: MenuEntry[]; contextMenu: ContextMenu; loading: boolean; busy: boolean; detail: string; message: string; isError: boolean; send(message: { command: string; [key: string]: unknown }): void; close(): void };
-function MenuGroupRow({ group, disabled, send }: { group: MenuGroup; disabled: boolean; send: Props['send'] }) {
+type Props = { entries: MenuEntry[]; analysis?: MenuAnalysis; naming?: boolean; contextMenu: ContextMenu; loading: boolean; busy: boolean; detail: string; message: string; isError: boolean; send(message: { command: string; [key: string]: unknown }): void; close(): void };
+const scenes = [['file', '文件'], ['folder', '文件夹'], ['folder-bg', '文件夹空白处'], ['desktop-bg', '桌面空白处'], ['drive', '磁盘'], ['type', '特定文件类型'], ['all', '所有位置']];
+function MenuGroupRow({ group, groups, disabled, send, depth = 0 }: { group: MenuGroup; groups: MenuGroup[]; disabled: boolean; send: Props['send']; depth?: number }) {
   const [expanded, setExpanded] = useState(false);
-  const locations = group.scopes.map(scope => ({ scope, entries: group.entries.filter(e => e.scope === scope) }));
-  const active = group.entries.filter(e => e.enabled).length;
-  const editableOn = group.editable.length > 0 && group.editable.every(e => e.enabled);
-  const label = active === group.entries.length ? (group.kind === '一级菜单' ? '已注册' : '已启用') : active === 0 ? '已停用' : '部分启用';
-  const change = () => {
-    const enabled = !editableOn;
-    const ids = group.editable.filter(e => e.enabled !== enabled).map(e => e.id);
-    send({ command: 'toggleSystemMenus', ids, enabled });
-  };
-  return <article className="menu-function"><div className="system-menu-row"><span className={`menu-dot ${active > 0 ? 'enabled' : ''}`} /><div><strong>{group.title}</strong><p>{group.source}<span>·</span>{group.kind}<span>·</span>{scopeSummary(group.scopes)}</p><button className="menu-detail-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '收起位置' : '出现位置'}<ChevronDown size={11} /></button></div><span className="menu-row-state">{label}</span>{group.editable.length > 0 ? <button className={`toggle ${editableOn ? 'on' : ''}`} role="switch" aria-label={`${editableOn ? '停用' : '恢复'} ${group.title}`} aria-checked={editableOn} disabled={disabled} onClick={change}><span /></button> : <span className="menu-readonly">仅查看</span>}</div>
-    {expanded && <div className="menu-function-details"><p>{group.kind === '一级菜单' ? '这个软件动态生成菜单命令，当前只能查看；请在所属软件设置中调整。' : '相同名称可能对应多个文件类型。这里可逐个调整位置，不会移除所属软件。'}</p>{locations.map(location => {
-      const editable = location.entries.filter(e => e.canToggle), on = editable.length > 0 && editable.every(e => e.enabled);
-      const enabled = location.entries.filter(e => e.enabled).length;
-      return <div className="menu-location-row" key={location.scope}><span>{location.scope}</span><small>{enabled === location.entries.length ? '已启用' : enabled === 0 ? '已停用' : '部分启用'}{editable.length === 0 ? ' · 仅查看' : ''}</small>{editable.length > 0 && <button className={`toggle ${on ? 'on' : ''}`} role="switch" aria-label={`${on ? '停用' : '恢复'} ${group.title} ${location.scope}`} aria-checked={on} disabled={disabled} onClick={() => send({ command: 'toggleSystemMenus', ids: editable.filter(e => e.enabled === on).map(e => e.id), enabled: !on })}><span /></button>}</div>;
-    })}</div>}
+  const children = depth < 6 ? groups.filter(g => g.entries.some(e => group.entries.some(p => p.id === e.parentId))) : [];
+  const active = group.entries.filter(e => e.enabled).length, on = group.editable.length > 0 && group.editable.every(e => e.enabled);
+  const states = [...new Set(group.entries.map(e => e.state || (e.enabled ? '已注册' : '已停用')))];
+  const label = active === 0 ? '已停用' : active < group.entries.length ? '部分启用' : states.length === 1 ? states[0] : '已注册';
+  return <article className={`menu-function ${depth > 0 ? 'menu-child' : ''}`}><div className="system-menu-row"><span className={`menu-dot ${active > 0 ? 'enabled' : ''}`} /><div><strong>{group.title}</strong><p>{group.source}<span>·</span>{group.kind}<span>·</span>{scopeSummary(group.scopes)}</p><button className="menu-detail-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '收起详情' : children.length ? `查看子菜单 · ${children.length}` : '查看详情'}<ChevronDown size={11} /></button></div><span className="menu-row-state">{label}</span>{group.editable.length > 0 ? <button className={`toggle ${on ? 'on' : ''}`} role="switch" aria-label={`${on ? '停用' : '恢复'} ${group.title}`} aria-checked={on} disabled={disabled} onClick={() => send({ command: 'toggleSystemMenus', ids: group.editable.filter(e => e.enabled === on).map(e => e.id), enabled: !on })}><span /></button> : <span className="menu-readonly">仅查看</span>}</div>
+    {expanded && <div className="menu-function-details">{group.entries.map(entry => <div className="menu-registration" key={`${entry.id}:${entry.parentId}`}><div className="menu-location-row"><span>{entry.scope}</span><small>{entry.state || (entry.enabled ? '已注册' : '已停用')}{!entry.canToggle ? ' · 仅查看' : ''}</small>{entry.canToggle && <button className={`toggle ${entry.enabled ? 'on' : ''}`} role="switch" aria-label={`${entry.enabled ? '停用' : '恢复'} ${group.title} ${entry.scope}`} aria-checked={entry.enabled} disabled={disabled} onClick={() => send({ command: 'toggleSystemMenus', ids: [entry.id], enabled: !entry.enabled })}><span /></button>}</div><p>{entry.detail}</p>{entry.rawName && entry.rawName !== entry.title && <small>原始名称：{entry.rawName}</small>}{entry.registration && <><code>{entry.registration}</code><button className="menu-detail-toggle" onClick={() => send({ command: 'copyMenuRegistration', id: entry.id })}>复制来源位置</button></>}</div>)}{children.length > 0 && <div className="menu-children">{children.map(child => <MenuGroupRow key={child.key} group={child} groups={groups} disabled={disabled} send={send} depth={depth + 1} />)}</div>}</div>}
   </article>;
 }
-export function MenuManager({ entries, contextMenu, loading, busy, detail, message, isError, send, close }: Props) {
-  const [search, setSearch] = useState(''), [tab, setTab] = useState('software'), [scope, setScope] = useState('all'), [kind, setKind] = useState('all');
-  const [onlyEditable, setOnlyEditable] = useState(false);
-  const [listPage, setListPage] = useState(0);
+export function MenuManager({ entries, analysis, naming, contextMenu, loading, busy, detail, message, isError, send, close }: Props) {
+  const [search, setSearch] = useState(''), [mode, setMode] = useState('scene'), [scene, setScene] = useState('file'), [extension, setExtension] = useState('');
+  const [software, setSoftware] = useState('all'), [onlyEditable, setOnlyEditable] = useState(false), [listPage, setListPage] = useState(0);
   const dialog = useRef<HTMLElement>(null);
   useEffect(() => { const opener = document.activeElement as HTMLElement | null; dialog.current?.focus(); return () => opener?.focus(); }, []);
-  const groups = groupMenus(entries), changed = groups.filter(g => g.managed.length > 0).length;
-  const query = search.trim().toLocaleLowerCase();
-  const ordinary = (e: MenuEntry) => e.source !== 'Windows' && e.source !== '未识别的软件';
-  const softwareGroups = groups.filter(g => g.entries.some(ordinary));
-  const softwareCount = new Set(softwareGroups.map(g => g.source)).size;
-  const filtered = groupMenus(entries.filter(e => (tab === 'changed' ? e.managed : tab === 'other' ? !ordinary(e) : ordinary(e))
-    && (!onlyEditable || e.canToggle) && (scope === 'all' || (scope === 'specific' ? e.scope.startsWith('特定类型') : e.scope === scope))
-    && (kind === 'all' || e.kind === kind) && `${e.title} ${e.source} ${e.scope}`.toLocaleLowerCase().includes(query)));
+  useEffect(() => { if (analysis) { setMode('scene'); setSearch(''); setOnlyEditable(false); } }, [analysis]);
+  const changed = entries.filter(e => e.managed).length;
+  const sources = [...new Set(entries.filter(e => (e.category || 'context') === 'context').map(e => e.source))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const query = search.trim().toLocaleLowerCase(), category = (e: MenuEntry) => e.category || 'context';
+  const available = entries.filter(e => (mode === 'changed' ? e.managed : ['new', 'sendto', 'openwith'].includes(mode) ? category(e) === mode : category(e) === 'context')
+    && (mode !== 'scene' || (analysis ? analysis.locations.some(l => l.toLowerCase() === e.location?.toLowerCase()) : inScene(e, scene, extension))) && (mode !== 'software' || software === 'all' || e.source === software));
+  const filtered = groupMenus(withParents(available.filter(e => (!onlyEditable || e.canToggle) && `${e.title} ${e.source} ${e.scope} ${e.rawName || ''}`.toLocaleLowerCase().includes(query)), available));
+  const roots = filtered.filter(g => !g.entries[0].parentId || !filtered.some(p => p.entries.some(e => e.id === g.entries[0].parentId)));
   const disabled = busy || loading;
-  useEffect(() => setListPage(0), [query, tab, scope, kind, onlyEditable]);
-  const pages = Math.max(1, Math.ceil(filtered.length / 50)), currentPage = Math.min(listPage, pages - 1);
-  const visible = filtered.slice(currentPage * 50, (currentPage + 1) * 50);
-  return <div className="modal-backdrop menu-backdrop" onClick={() => { if (!busy) close(); }} onDrop={e => { e.preventDefault(); e.stopPropagation(); }}>
-    <section ref={dialog} tabIndex={-1} className="menu-manager" role="dialog" aria-modal="true" aria-labelledby="menu-title" onClick={e => e.stopPropagation()} onKeyDown={e => {
-      if (e.key === 'Escape' && !busy) { e.stopPropagation(); close(); }
-      if (e.key === 'Tab') {
-        const elements = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, select') ?? []), first = elements[0], last = elements.at(-1);
-        if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { e.preventDefault(); last?.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
-      }
-    }}>
-      <header className="menu-manager-header"><span className="setting-icon"><Settings2 size={23} /></span><div><h2 id="menu-title">右键菜单管理</h2><p>让常用的留下，让多余的收起来。</p></div><button className="icon-button" aria-label="关闭右键菜单管理" disabled={busy} onClick={close}><X size={20} /></button></header>
-      <div className="menu-manager-body">
-        <section className="own-menu-card"><span className="setting-icon"><FileText size={22} /></span><div><span className="eyebrow">归序 · Windows 11 一级菜单</span><h3>复制文件路径 <span className="menu-state">{!contextMenu.checked ? '检查中' : contextMenu.installed ? '已注册' : '未启用'}</span></h3><p>文件和文件夹都能用，多选每行一个路径，不带引号。</p><small>{contextMenu.detail}</small></div><div className="own-menu-actions"><button className="button primary" aria-label={contextMenu.installed ? '移除复制路径菜单' : '添加复制路径菜单'} disabled={disabled || !contextMenu.checked || (!contextMenu.installed && (!contextMenu.supported || !contextMenu.available))} onClick={() => send({ command: contextMenu.installed ? 'removeContextMenu' : 'installContextMenu' })}>{contextMenu.installed ? '移除菜单' : '添加菜单'}</button>{contextMenu.installed && <button className="button subtle" disabled={disabled} onClick={() => send({ command: 'repairContextMenu' })}><RotateCcw size={13} />修复归序菜单</button>}</div></section>
-        <p className="menu-cache-note">桌面有、文件夹内没有？先点「修复归序菜单」，再关闭并重开文件夹窗口。仍不显示时退出并重新登录 Windows，让资源管理器重新加载组件。</p>
-        {!contextMenu.installed && contextMenu.available && <p className="menu-signature-note">首次添加需要管理员确认本机签名信任，对所有账户生效；菜单仅注册给当前账户。</p>}
-        <div className="menu-section-heading"><div><h3>这台电脑的菜单</h3><span>{loading ? '正在读取…' : `${softwareCount} 个软件 · ${softwareGroups.length} 项菜单功能`}</span></div><button className="button subtle" disabled={disabled} onClick={() => { send({ command: 'systemMenus' }); send({ command: 'contextMenuStatus' }); }}>{loading ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}刷新</button></div>
-        <div className="menu-tabs" role="tablist" aria-label="菜单范围">{[['software', '软件菜单'], ['other', '系统与其他'], ['changed', `归序停用 · ${changed}`]].map(([value, label]) => <button key={value} role="tab" aria-selected={tab === value} onClick={() => setTab(value)}>{label}</button>)}{changed > 0 && <button className="menu-restore" disabled={disabled} onClick={() => send({ command: 'restoreSystemMenus' })}>恢复归序停用的项目</button>}</div>
-        <div className="menu-filters"><label className="search-box"><Search size={15} /><input aria-label="搜索右键菜单" placeholder="搜索菜单或软件名称" value={search} onChange={e => setSearch(e.target.value)} /></label><label><select aria-label="菜单出现位置" value={scope} onChange={e => setScope(e.target.value)}>{[['all', '所有位置'], ['所有文件', '所有文件'], ['文件与文件夹', '文件与文件夹'], ['文件夹', '文件夹'], ['空白处', '空白处'], ['磁盘', '磁盘'], ['specific', '特定文件类型']].map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select><ChevronDown size={12} /></label><label><select aria-label="菜单层级" value={kind} onChange={e => setKind(e.target.value)}><option value="all">所有层级</option><option value="一级菜单">一级菜单</option><option value="更多选项">更多选项</option><option value="命令扩展">命令扩展</option></select><ChevronDown size={12} /></label></div>
-        <div className="menu-list-note"><p>同一功能在不同文件类型下的重复注册已合并。展开「出现位置」可单独调整；主开关作用于当前筛选下可调整的位置。</p><label><input type="checkbox" checked={onlyEditable} onChange={e => setOnlyEditable(e.target.checked)} />只看可调整</label></div>
-        {detail && <p className="menu-read-warning" role="status">{detail}</p>}
-        <div className="menu-list" aria-busy={loading}>{loading ? <div className="menu-empty"><LoaderCircle className="spin" size={24} /><p>正在识别软件和菜单功能…</p></div> : visible.length === 0 ? <div className="menu-empty"><Settings2 size={25} /><p>{tab === 'changed' && !query ? '还没有由归序停用的菜单。' : '这个范围内没有符合条件的菜单。'}</p>{(query || scope !== 'all' || kind !== 'all' || onlyEditable) && <button onClick={() => { setSearch(''); setScope('all'); setKind('all'); setOnlyEditable(false); }}>清除筛选</button>}</div> : visible.map(group => <MenuGroupRow key={group.key} group={group} disabled={disabled} send={send} />)}</div>
-        <div className="menu-pagination"><span>{filtered.length} 项菜单功能 · 第 {currentPage + 1} / {pages} 页</span><button disabled={currentPage === 0} onClick={() => setListPage(currentPage - 1)}>上一页</button><button disabled={currentPage >= pages - 1} onClick={() => setListPage(currentPage + 1)}>下一页</button></div>
-      </div>
-      <footer className={`menu-manager-footer ${isError ? 'error' : ''}`} role="status">{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}<span>{message || '所有更改都会保留恢复记录。归序不会自动重启资源管理器。'}</span></footer>
-    </section>
-  </div>;
+  useEffect(() => setListPage(0), [query, mode, scene, extension, software, onlyEditable, analysis]);
+  const pages = Math.max(1, Math.ceil(roots.length / 40)), currentPage = Math.min(listPage, pages - 1), visible = roots.slice(currentPage * 40, (currentPage + 1) * 40);
+  const selectMode = (value: string) => { setMode(value); setSoftware('all'); send({ command: 'clearMenuAnalysis' }); };
+  const heading = mode === 'software' ? '按软件查看' : mode === 'new' ? '新建模板' : mode === 'sendto' ? '发送到' : mode === 'openwith' ? '打开方式' : mode === 'changed' ? '归序停用的项目' : analysis ? `对象：${analysis.name}` : `${scenes.find(([s]) => s === scene)?.[1]}的右键菜单`;
+  return <div className="modal-backdrop menu-backdrop" onClick={() => { if (!busy) close(); }} onDrop={e => { e.preventDefault(); e.stopPropagation(); }}><section ref={dialog} tabIndex={-1} className="menu-manager" role="dialog" aria-modal="true" aria-labelledby="menu-title" onClick={e => e.stopPropagation()} onKeyDown={e => {
+    if (e.key === 'Escape' && !busy) { e.stopPropagation(); close(); }
+    if (e.key === 'Tab') { const elements = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)') ?? []), first = elements[0], last = elements.at(-1); if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { e.preventDefault(); last?.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); } }
+  }}>
+    <header className="menu-manager-header"><span className="setting-icon"><Settings2 size={23} /></span><div><h2 id="menu-title">右键菜单管理</h2><p>按右键的位置查找，逐项调整，随时恢复。</p></div><button className="icon-button" aria-label="关闭右键菜单管理" disabled={busy} onClick={close}><X size={20} /></button></header>
+    <div className="menu-manager-body"><section className="own-menu-card"><span className="setting-icon"><FileText size={22} /></span><div><span className="eyebrow">归序 · Windows 11 一级菜单</span><h3>复制文件路径 <span className="menu-state">{!contextMenu.checked ? '检查中' : contextMenu.installed ? '已注册' : '未启用'}</span></h3><p>文件和文件夹都能用，多选每行一个路径，不带引号。</p><small>{contextMenu.detail}</small></div><div className="own-menu-actions"><button className="button primary" aria-label={contextMenu.installed ? '移除复制路径菜单' : '添加复制路径菜单'} disabled={disabled || !contextMenu.checked || (!contextMenu.installed && (!contextMenu.supported || !contextMenu.available))} onClick={() => send({ command: contextMenu.installed ? 'removeContextMenu' : 'installContextMenu' })}>{contextMenu.installed ? '移除菜单' : '添加菜单'}</button>{contextMenu.installed && <button className="button subtle" disabled={disabled} onClick={() => send({ command: 'repairContextMenu' })}><RotateCcw size={13} />修复归序菜单</button>}</div></section>
+      {!contextMenu.installed && contextMenu.available && <p className="menu-signature-note">首次添加需要管理员确认本机签名信任，对所有账户生效；菜单仅注册给当前账户。</p>}
+      <div className="menu-section-heading"><div><h3>这台电脑的菜单</h3><span>{loading ? '正在读取…' : `${sources.length} 个来源`}</span></div><button className="button subtle" disabled={disabled} onClick={() => { send({ command: 'systemMenus' }); send({ command: 'contextMenuStatus' }); }}>{loading ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}刷新</button></div>
+      <div className="menu-workspace"><nav className="menu-navigation" aria-label="菜单查找方式"><span>出现位置</span>{scenes.map(([value, label]) => <button key={value} aria-current={mode === 'scene' && !analysis && scene === value ? 'page' : undefined} onClick={() => { selectMode('scene'); setScene(value); }}>{label}</button>)}<span>其他查找方式</span>{[['software', '按软件查看'], ['new', '新建模板'], ['sendto', '发送到'], ['openwith', '打开方式'], ['changed', `归序停用 · ${changed}`]].map(([value, label]) => <button key={value} aria-current={mode === value ? 'page' : undefined} onClick={() => selectMode(value)}>{label}</button>)}</nav>
+        <div className="menu-results"><div className="menu-result-heading"><h3>{heading}</h3>{changed > 0 && <button className="menu-restore" disabled={disabled} onClick={() => send({ command: 'restoreSystemMenus' })}>恢复归序停用的项目</button>}</div><div className="menu-object-picker"><span>按具体对象查找</span><button disabled={disabled} onClick={() => send({ command: 'analyzeMenuFile' })}><FileText size={12} />选择文件</button><button disabled={disabled} onClick={() => send({ command: 'analyzeMenuFolder' })}><FolderOpen size={12} />选择文件夹</button></div>
+          {mode === 'scene' && analysis && <p className="menu-analysis-note">{analysis.detail}<button onClick={() => send({ command: 'clearMenuAnalysis' })}>取消对象筛选</button></p>}
+          {mode === 'scene' && scene === 'type' && !analysis && <label className="menu-type-input">文件类型<input aria-label="筛选文件扩展名" placeholder="例如 .pdf、docx" value={extension} onChange={e => setExtension(e.target.value)} /></label>}
+          <div className="menu-filters"><label className="search-box"><Search size={15} /><input aria-label="搜索右键菜单" placeholder="搜索菜单或软件名称" value={search} onChange={e => setSearch(e.target.value)} /></label>{mode === 'software' && <label><select aria-label="选择菜单所属软件" value={software} onChange={e => setSoftware(e.target.value)}><option value="all">所有软件</option>{sources.map(s => <option key={s}>{s}</option>)}</select><ChevronDown size={12} /></label>}</div>
+          <div className="menu-list-note"><p>{mode === 'new' ? '全部账户的模板需要管理员确认。每条注册单独保留，可随时恢复。' : mode === 'sendto' ? '管理当前账户的发送到入口，隐藏后保留快捷方式和目标。' : mode === 'openwith' ? '应用列表与文件类型推荐分别注册；隐藏入口不会改变默认打开程序。' : '已注册的组件可能按条件显示。不同命令分别列出，展开查看来源和子菜单。'}</p><label><input type="checkbox" checked={onlyEditable} onChange={e => setOnlyEditable(e.target.checked)} />只看可调整</label></div>
+          {naming && <p className="menu-read-warning" role="status">正在后台识别组件名称，可以继续查看和调整菜单。</p>}
+          {detail && <p className="menu-read-warning" role="status">{detail}</p>}
+          <div className="menu-list" aria-busy={loading}>{loading ? <div className="menu-empty"><LoaderCircle className="spin" size={24} /><p>正在读取菜单和名称…</p></div> : visible.length === 0 ? <div className="menu-empty"><Settings2 size={25} /><p>这个范围内没有符合条件的菜单。</p>{(query || onlyEditable || extension) && <button onClick={() => { setSearch(''); setExtension(''); setOnlyEditable(false); }}>清除筛选</button>}</div> : visible.map(group => <MenuGroupRow key={group.key} group={group} groups={filtered} disabled={disabled} send={send} />)}</div>
+          <div className="menu-pagination"><span>{roots.length} 项 · 第 {currentPage + 1} / {pages} 页</span><button disabled={currentPage === 0} onClick={() => setListPage(currentPage - 1)}>上一页</button><button disabled={currentPage >= pages - 1} onClick={() => setListPage(currentPage + 1)}>下一页</button></div>
+        </div></div>
+    </div><footer className={`menu-manager-footer ${isError ? 'error' : ''}`} role="status">{busy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}<span>{message || '归序保留自己的恢复记录；系统基础功能和尚未验证的组件仅查看。'}</span></footer>
+  </section></div>;
 }
