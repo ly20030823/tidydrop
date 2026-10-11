@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private bool menusLoading;
     private string menusDetail = "";
     private readonly bool smokeTest;
+    private readonly List<RecycleBin.Receipt> smokeRecycled = [];
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     public MainWindow(bool smokeTest = false)
@@ -142,6 +143,11 @@ public partial class MainWindow : Window
                     if (sourcePicker.ShowDialog(this) == true) HandleIncomingPaths([sourcePicker.FolderName]);
                     break;
                 case "refreshLibrary": await RefreshLibrary(rebuild: true); await ProcessQueued(); break;
+                case "recycleMaterials":
+                    if (!settings.RootFolder.Equals(root.GetProperty("rootFolder").GetString(), StringComparison.OrdinalIgnoreCase))
+                        throw new IOException("归档位置已变化，请重新选择要删除的材料。");
+                    await RemoveMaterials(root.GetProperty("ids").EnumerateArray().Select(item => item.GetString() ?? "").ToArray());
+                    break;
                 case "contextMenuStatus": await UpdateContextMenuStatus(); break;
                 case "installContextMenu": await ChangeContextMenu(true); break;
                 case "removeContextMenu": await ChangeContextMenu(false); break;
@@ -287,6 +293,25 @@ public partial class MainWindow : Window
             var result = await Task.Run(() => organizer.Undo(entry, history));
             message = entry.FileName + "：" + result.Message;
             isError = !result.Success;
+        }
+        finally { busy = false; await RefreshLibrary(); }
+        await ProcessQueued();
+    }
+
+    private async Task RemoveMaterials(string[] ids)
+    {
+        if (ids.Length == 0) return;
+        busy = true;
+        Notify("正在将材料移入回收站…");
+        try
+        {
+            var removal = new ArchiveRemoval(settings, store, catalog, path => { var receipt = RecycleBin.Move(path); if (smokeTest) smokeRecycled.Add(receipt); });
+            var results = await RecycleBin.RunAsync(() => removal.Remove(ids, history));
+            var count = results.Count(result => result.Success);
+            message = $"{count} 份材料已移入回收站。";
+            if (results.Any(result => !result.Success)) message += "未完成：" + string.Join("；", results.Where(result => !result.Success).Select(result => result.FileName + "：" + result.Message));
+            else if (results.Any(result => result.Message.Contains("；"))) message += string.Join("；", results.Where(result => result.Message.Contains("；")).Select(result => result.Message));
+            isError = results.Any(result => !result.Success || result.Message.Contains("需检查") || result.Message.Contains("待修复"));
         }
         finally { busy = false; await RefreshLibrary(); }
         await ProcessQueued();
@@ -610,6 +635,7 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '撤销').click()");
             await WaitUntil(() => Task.FromResult(!busy && history.All(entry => entry.State == "已撤销")));
             if (File.ReadAllText(source) != "React bridge check 中文") throw new IOException("Bridge undo check failed.");
+            if (Environment.GetCommandLineArgs().Contains("--check-recycle")) await CheckRemovalInterface();
             File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS context menu settings bridge (simulated installation)\nPASS three-level software menus, independent positions, same-name identity and complete search results\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\nPASS animated view switching, rapid clicks, reduced motion, and fallback\n");
             Application.Current.Shutdown(0);
         }
@@ -632,6 +658,59 @@ public partial class MainWindow : Window
         var folder = Path.Combine(settings.RootFolder, "归序", date.ToString("yyyy-MM"), date.ToString("yyyy-MM-dd"), category);
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, name), "Generated library check fixture");
+    }
+
+    private async Task CheckRemovalInterface()
+    {
+        AddLibrarySample(DateTime.Today, "文档", "删除检查.txt");
+        var folder = Path.Combine(settings.RootFolder, "归序", DateTime.Today.ToString("yyyy-MM"), DateTime.Today.ToString("yyyy-MM-dd"), "文件夹", "删除检查文件夹");
+        Directory.CreateDirectory(Path.Combine(folder, "空目录"));
+        File.WriteAllText(Path.Combine(folder, "内部.txt"), "Generated removal fixture");
+        Browser.CoreWebView2.PostWebMessageAsJson("{\"type\":\"navigate\",\"page\":\"library\"}");
+        await WaitUntil(async () => (await Browser.ExecuteScriptAsync("document.querySelector('.library-section') !== null")) == "true");
+        await RefreshLibrary(rebuild: true);
+        await SetLibrarySearch("删除检查");
+        await CheckScript("document.querySelectorAll('.archive-row').length === 2");
+        var file = library.Single(item => item.FileName == "删除检查.txt");
+        await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"删除材料：删除检查.txt\"]').click()");
+        await CheckScript("document.querySelector('.recycle-dialog') !== null && document.activeElement.textContent === '取消'");
+        await Browser.ExecuteScriptAsync("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))");
+        await CheckScript("document.querySelector('.recycle-dialog') === null");
+        if (!File.Exists(file.Path) || !Directory.Exists(folder)) throw new IOException("Cancel removed materials.");
+        await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"删除材料：删除检查.txt\"]').click()");
+        await CheckScript("document.querySelector('.recycle-dialog') !== null");
+        await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"确认移入回收站\"]').click()");
+        await WaitUntil(() => Task.FromResult(!busy && !File.Exists(file.Path) && library.All(item => item.Id != file.Id)));
+        await CheckScript("document.querySelectorAll('.archive-row').length === 1");
+        try
+        {
+            await RecycleBin.RunAsync(() => { RecycleBin.RestoreForCheck(smokeRecycled.Single()); smokeRecycled.Clear(); return true; });
+            await RefreshLibrary(rebuild: true);
+            await CheckScript("document.querySelectorAll('.archive-row').length === 2");
+            await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按类型').click()");
+            await CheckScript("document.querySelector('.view-type') !== null && document.querySelectorAll('.archive-row').length === 2");
+            await Task.Delay(550);
+            using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-removal-library.png")))
+                await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"全选当前结果\"]').click()");
+            await CheckScript("document.querySelector('.material-selection button')?.disabled === false");
+            await Browser.ExecuteScriptAsync("document.querySelector('.material-selection button').click()");
+            await CheckScript("document.querySelector('.recycle-dialog')?.innerText.includes('2 份') && document.querySelector('.folder-removal-note')?.textContent.includes('1 个文件夹')");
+            using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-removal-confirm.png")))
+                await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"确认移入回收站\"]').click()");
+            await WaitUntil(() => Task.FromResult(!busy && !File.Exists(file.Path) && !Directory.Exists(folder)));
+            await CheckScript("document.querySelectorAll('.archive-row').length === 0 && document.querySelector('.empty-state') !== null");
+            if (catalog.Load(history).Any(item => item.FileName.StartsWith("删除检查"))) throw new IOException("Removal was not persisted.");
+        }
+        finally
+        {
+            await RecycleBin.RunAsync(() => { foreach (var receipt in smokeRecycled) RecycleBin.RestoreForCheck(receipt); smokeRecycled.Clear(); return true; });
+        }
+        if (File.ReadAllText(file.Path) != "Generated library check fixture" || File.ReadAllText(Path.Combine(folder, "内部.txt")) != "Generated removal fixture" || !Directory.Exists(Path.Combine(folder, "空目录"))) throw new IOException("Removal fixture restore changed bytes.");
+        await RefreshLibrary(rebuild: true);
+        await CheckScript("document.querySelectorAll('.archive-row').length === 2");
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-removal-checks.txt"), "PASS cancel and Escape preserve files\nPASS single delete from date view\nPASS restore and manual refresh\nPASS batch delete from type view including folder contents\nPASS persisted catalog removal\nPASS restore file and nested folder bytes and empty directory\n");
     }
 
     private async Task CheckViewAnimations()

@@ -268,6 +268,117 @@ Check("Catalog failure after undo leaves restored bytes intact and repairs the r
     }
     Assert(new ArchiveCatalog(context.Settings).Load(context.History).Count == 0 && !File.Exists(PendingPath(context)));
 });
+Check("Removal updates catalog and history for files and whole folders without scanning unrelated additions", context =>
+{
+    var file = context.File("删除.txt", "file bytes");
+    var folder = Path.Combine(context.Folder, "整包");
+    context.File("整包/内部/报告.txt", "folder bytes");
+    Directory.CreateDirectory(Path.Combine(folder, "空目录"));
+    context.Engine.Execute(context.Engine.Preview([file, folder], context.Settings), context.History);
+    var items = context.Catalog.Load(context.History);
+    var external = Path.Combine(Path.GetDirectoryName(items.Single(item => !item.IsDirectory).Path)!, "外部新增.txt");
+    File.WriteAllText(external, "not indexed");
+    var bin = Path.Combine(context.Folder, "fixture-bin");
+    Directory.CreateDirectory(bin);
+    var removal = new ArchiveRemoval(context.Settings, context.Store, context.Catalog, path =>
+    {
+        var target = Path.Combine(bin, Path.GetFileName(path));
+        Assert(Path.GetFullPath(path).StartsWith(context.Folder + Path.DirectorySeparatorChar) && target.StartsWith(context.Folder + Path.DirectorySeparatorChar));
+        if (Directory.Exists(path)) Directory.Move(path, target); else File.Move(path, target);
+    });
+    Assert(removal.Remove(items.Select(item => item.Id).Concat([items[0].Id]), context.History).Count == 2);
+    Assert(context.Catalog.Load([]).Count == 0 && context.Store.LoadHistory().All(entry => entry.State == "已移入回收站"));
+    Assert(File.ReadAllText(Path.Combine(bin, "删除.txt")) == "file bytes");
+    Assert(File.ReadAllText(Path.Combine(bin, "整包", "内部", "报告.txt")) == "folder bytes" && Directory.Exists(Path.Combine(bin, "整包", "空目录")));
+    Assert(File.ReadAllText(external) == "not indexed" && !File.Exists(PendingPath(context)));
+    File.Move(Path.Combine(bin, "删除.txt"), items.Single(item => !item.IsDirectory).Path);
+    Assert(context.Catalog.Load(context.History).Count == 0);
+    Assert(context.Catalog.Load(context.History, rebuild: true).Count == 2);
+});
+Check("Failed recycling and unknown IDs preserve materials, history and metadata", context =>
+{
+    var source = context.File("保留.txt", "keep");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    var item = context.Catalog.Load(context.History).Single();
+    var calls = 0;
+    var removal = new ArchiveRemoval(context.Settings, context.Store, context.Catalog, _ => { calls++; throw new IOException("fixture refused recycle"); });
+    var results = removal.Remove(["unknown", item.Id], context.History);
+    Assert(results.All(result => !result.Success) && calls == 1);
+    Assert(File.ReadAllText(item.Path) == "keep" && context.Store.LoadHistory().Single().State == "已归档");
+    Assert(context.Catalog.Load([]).Single().Id == item.Id && !File.Exists(PendingPath(context)));
+});
+Check("Journal failure stops recycling before any filesystem change", context =>
+{
+    var source = context.File("保留.txt", "keep");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    var item = context.Catalog.Load(context.History).Single();
+    Directory.CreateDirectory(Path.Combine(context.Folder, "data", "history.json.tmp"));
+    var calls = 0;
+    var removal = new ArchiveRemoval(context.Settings, context.Store, context.Catalog, _ => calls++);
+    Assert(!removal.Remove([item.Id], context.History).Single().Success && calls == 0);
+    Assert(File.ReadAllText(item.Path) == "keep" && context.History.Single().State == "已归档");
+});
+Check("Removal catalog write failure keeps a recovery marker and restores consistency on reopening", context =>
+{
+    var source = context.File("删除.txt", "bytes");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    var item = context.Catalog.Load(context.History).Single();
+    var removal = new ArchiveRemoval(context.Settings, context.Store, context.Catalog, path => File.Move(path, Path.Combine(context.Folder, "fixture-bin.txt")));
+    using (var locked = new FileStream(CatalogPath(context), FileMode.Open, FileAccess.Read, FileShare.Read))
+    {
+        var result = removal.Remove([item.Id], context.History).Single();
+        Assert(result.Success && result.Message.Contains("清单待修复") && File.Exists(PendingPath(context)));
+    }
+    Assert(context.Catalog.Load(context.History).Count == 0 && !File.Exists(PendingPath(context)));
+    Assert(File.ReadAllText(Path.Combine(context.Folder, "fixture-bin.txt")) == "bytes");
+});
+Check("Interrupted recycling reports uncertainty and never replays deletion", context =>
+{
+    var first = context.File("留存.txt", "keep");
+    context.Engine.Execute(context.Engine.Preview([first], context.Settings), context.History);
+    var entry = context.History.Single();
+    entry.State = "回收中"; context.Store.SaveHistory(context.History);
+    context.Engine.Recover(context.History);
+    Assert(entry.State == "已归档" && File.ReadAllText(entry.Destination) == "keep");
+    File.Move(entry.Destination, Path.Combine(context.Folder, "fixture-bin.txt"));
+    entry.State = "回收中"; context.Store.SaveHistory(context.History);
+    context.Engine.Recover(context.History);
+    Assert(entry.State == "回收待核对" && File.ReadAllText(Path.Combine(context.Folder, "fixture-bin.txt")) == "keep");
+});
+Check("Ambiguous platform failure after moving a file reconciles the catalog without replaying removal", context =>
+{
+    var source = context.File("待核对.txt", "bytes");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    var item = context.Catalog.Load(context.History).Single();
+    var calls = 0;
+    var removal = new ArchiveRemoval(context.Settings, context.Store, context.Catalog, path => { calls++; File.Move(path, Path.Combine(context.Folder, "fixture-bin.txt")); throw new IOException("missing platform receipt"); });
+    Assert(!removal.Remove([item.Id], context.History).Single().Success && calls == 1);
+    Assert(File.Exists(PendingPath(context)) && context.History.Single().State == "回收待核对");
+    Assert(context.Catalog.Load(context.History).Count == 0 && !File.Exists(PendingPath(context)) && calls == 1);
+});
+Check("Mixed removal failures preserve untouched items and allow successful siblings", context =>
+{
+    var first = context.File("a.txt", "keep"); var second = context.File("b.txt", "recycle");
+    context.Engine.Execute(context.Engine.Preview([first, second], context.Settings), context.History);
+    var items = context.Catalog.Load(context.History);
+    var removal = new ArchiveRemoval(context.Settings, context.Store, context.Catalog, path => {
+        if (Path.GetFileName(path) == "a.txt") throw new IOException("cannot recycle");
+        File.Move(path, Path.Combine(context.Folder, "fixture-bin.txt"));
+    });
+    var results = removal.Remove(items.Select(item => item.Id), context.History);
+    Assert(results.Count(result => result.Success) == 1 && context.Catalog.Load([]).Single().FileName == "a.txt");
+    Assert(context.History.Single(entry => entry.FileName == "a.txt").State == "已归档" && context.History.Single(entry => entry.FileName == "b.txt").State == "已移入回收站");
+});
+Check("A catalog entry cannot cause removal of the organizational month directory", context =>
+{
+    var source = context.File("保留.txt", "keep");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    File.WriteAllText(CatalogPath(context), "{\"version\":1,\"items\":[{\"id\":\"bad\",\"relativePath\":\"归序/2026-10\",\"category\":\"文档\",\"date\":\"2026-10-11\",\"isDirectory\":true}]}");
+    var calls = 0;
+    var removal = new ArchiveRemoval(context.Settings, context.Store, context.Catalog, _ => calls++);
+    Assert(!removal.Remove(["bad"], context.History).Single().Success && calls == 0);
+    Assert(File.ReadAllText(context.History.Single().Destination) == "keep");
+});
 Check("An exclusively locked source remains untouched", context =>
 {
     var source = context.File("a.txt", "locked");

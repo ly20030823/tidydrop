@@ -60,6 +60,7 @@ function App() {
     if (message.command === 'saveSettings') setSnapshot(s => ({ ...s, settings: { ...s.settings, ...(message.settings as Partial<Settings>) } }));
     else if (message.command === 'pickRoot') setSnapshot(s => ({ ...s, settings: { ...s.settings, rootFolder: demoRoot }, message: '已选择示例归档文件夹。此页面仅用于预览。' }));
     else if (message.command === 'undo') setSnapshot(s => ({ ...s, history: s.history.map(h => h.id === message.id ? { ...h, state: '已撤销' } : h), message: '预览：已演示撤销状态，没有移动真实文件。' }));
+    else if (message.command === 'recycleMaterials') setSnapshot(s => ({ ...s, library: s.library.filter(item => !(message.ids as string[]).includes(item.id)), history: s.history.map(item => (message.ids as string[]).includes(item.id) ? { ...item, state: '已移入回收站' } : item), message: '预览：已演示删除状态，没有处理真实文件。' }));
     else setSnapshot(s => ({ ...s, message: '这是界面预览。文件选择、桌面快捷方式和整理操作请在桌面程序中使用。' }));
   }
   function updateSettings(change: Partial<Settings>) { send({ command: 'saveSettings', settings: { ...settings, ...change } }); }
@@ -84,7 +85,7 @@ function App() {
       <nav aria-label="主导航">{nav.map(({ key, icon: Icon, label }) => <button className={`nav-item ${page === key ? 'active' : ''}`} key={key} onClick={() => setPage(key)}><Icon size={19} strokeWidth={1.7} /><span>{label}</span>{key === 'history' && completed > 0 && <b>{completed}</b>}</button>)}</nav>
       <div className="sidebar-destination"><span className="destination-symbol"><Folder size={20} /></span><span className="eyebrow">你的归档空间</span><strong title={settings.rootFolder}>{settings.rootFolder ? settings.rootFolder.split(/[/\\]/).filter(Boolean).at(-1) || settings.rootFolder : '选择一个归处'}</strong><p>{settings.rootFolder ? '分类文件夹会自动建立' : '设置一次，之后拖入就好'}</p><button disabled={busy} onClick={() => send({ command: 'pickRoot' })}>{settings.rootFolder ? '更改文件夹' : '选择文件夹'}<ArrowUpRight size={15} /></button></div>
       <button className="menu-widget" aria-label="打开右键菜单管理" onClick={openMenuManager}><Settings2 size={17} /><span><strong>右键菜单管理</strong><small>整理电脑里的菜单项</small></span><ChevronRight size={14} /></button>
-      <div className="sidebar-bottom"><div><ShieldCheck size={17} /><span>文件留在你的电脑上</span></div><span>TidyDrop <i>·</i> v0.8.0</span></div>
+      <div className="sidebar-bottom"><div><ShieldCheck size={17} /><span>文件留在你的电脑上</span></div><span>TidyDrop <i>·</i> v0.9.0</span></div>
     </aside>
     <main>
       <div className="topbar"><span>少一点杂乱，多一点从容</span><div><span className="local-pill"><i />本地运行</span><button className="icon-button" aria-label="使用帮助" title="使用帮助" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div></div>

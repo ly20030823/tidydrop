@@ -174,9 +174,11 @@ public sealed class Organizer(Store store, ArchiveCatalog? catalog = null)
     public void Recover(List<HistoryEntry> history)
     {
         var changed = false;
-        foreach (var entry in history.Where(e => e.State is "待执行" or "撤销中"))
+        foreach (var entry in history.Where(e => e.State is "待执行" or "撤销中" or "回收中"))
         {
-            if (entry.State == "待执行")
+            if (entry.State == "回收中")
+                entry.State = Exists(entry.Destination) ? "已归档" : "回收待核对";
+            else if (entry.State == "待执行")
                 entry.State = !Exists(entry.Source) && HashMatches(entry.Destination, entry.Hash)
                     ? "已归档" : "未完成";
             else

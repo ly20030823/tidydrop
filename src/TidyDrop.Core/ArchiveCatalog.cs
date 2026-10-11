@@ -170,6 +170,16 @@ public sealed class ArchiveCatalog(Settings settings)
 
         internal Mutation(string root, CatalogDocument document, IDisposable guard) { this.root = root; this.document = document; this.guard = guard; }
 
+        public List<ArchiveItem> Items => ToItems(root, document);
+
+        public void CommitRemoval(IEnumerable<ArchiveItem> removed)
+        {
+            var paths = removed.Select(item => Path.GetFullPath(item.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            document.Items.RemoveAll(item => paths.Contains(Resolve(root, item.RelativePath)));
+            Save(root, document);
+            ClearPending(root);
+        }
+
         public void Commit(IEnumerable<HistoryEntry> changed)
         {
             var entries = document.Items.ToDictionary(item => Resolve(root, item.RelativePath), StringComparer.OrdinalIgnoreCase);

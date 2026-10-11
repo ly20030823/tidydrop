@@ -1,4 +1,4 @@
-param([string]$Installer = 'artifacts/installer/TidyDrop-Setup-0.8.0-win-x64.exe', [switch]$WithMenu)
+param([string]$Installer = 'artifacts/installer/TidyDrop-Setup-0.9.0-win-x64.exe', [switch]$WithMenu)
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path $PSScriptRoot -Parent
 Push-Location $workspace

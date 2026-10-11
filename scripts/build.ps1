@@ -16,6 +16,8 @@ try {
     } finally { Pop-Location }
     dotnet run --project tests/TidyDrop.Checks/TidyDrop.Checks.csproj -c Release -- artifacts/checks
     if ($LASTEXITCODE -ne 0) { throw '核心检查失败' }
+    dotnet run --project tests/TidyDrop.RecycleChecks/TidyDrop.RecycleChecks.csproj -c Release -- artifacts/recycle-checks
+    if ($LASTEXITCODE -ne 0) { throw '回收站操作检查失败' }
     dotnet run --project tests/TidyDrop.MenuChecks/TidyDrop.MenuChecks.csproj -c Release -- artifacts/shell-checks/TidyDrop.ShellChecks.exe
     if ($LASTEXITCODE -ne 0) { throw '菜单停用与恢复检查失败' }
     $publishArguments = @('publish','src/TidyDrop.App/TidyDrop.App.csproj','-c','Release','-o',$OutputDirectory)
