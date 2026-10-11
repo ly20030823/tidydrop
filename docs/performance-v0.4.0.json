@@ -1,0 +1,174 @@
+[
+  {
+    "count": 100,
+    "days": 100,
+    "initialMs": 68.0741,
+    "samples": [
+      {
+        "view": "type",
+        "repeat": 0,
+        "ms": 249.10000000009313,
+        "nodes": 1712
+      },
+      {
+        "view": "date",
+        "repeat": 0,
+        "ms": 43.700000000186265,
+        "nodes": 3048
+      },
+      {
+        "view": "type",
+        "repeat": 1,
+        "ms": 25.100000000093132,
+        "nodes": 1712
+      },
+      {
+        "view": "date",
+        "repeat": 1,
+        "ms": 44.89999999990687,
+        "nodes": 3048
+      },
+      {
+        "view": "type",
+        "repeat": 2,
+        "ms": 29.200000000186265,
+        "nodes": 1712
+      },
+      {
+        "view": "date",
+        "repeat": 2,
+        "ms": 46.700000000186265,
+        "nodes": 3048
+      }
+    ]
+  },
+  {
+    "count": 1000,
+    "days": 365,
+    "initialMs": 217.3639,
+    "samples": [
+      {
+        "view": "type",
+        "repeat": 0,
+        "ms": 188,
+        "nodes": 14277
+      },
+      {
+        "view": "date",
+        "repeat": 0,
+        "ms": 229.8000000002794,
+        "nodes": 18706
+      },
+      {
+        "view": "type",
+        "repeat": 1,
+        "ms": 169.70000000018626,
+        "nodes": 14277
+      },
+      {
+        "view": "date",
+        "repeat": 1,
+        "ms": 247.10000000009313,
+        "nodes": 18706
+      },
+      {
+        "view": "type",
+        "repeat": 2,
+        "ms": 175.10000000009313,
+        "nodes": 14277
+      },
+      {
+        "view": "date",
+        "repeat": 2,
+        "ms": 252.59999999962747,
+        "nodes": 18706
+      }
+    ]
+  },
+  {
+    "count": 5000,
+    "days": 365,
+    "initialMs": 688.9056,
+    "samples": [
+      {
+        "view": "type",
+        "repeat": 0,
+        "ms": 741.3000000002794,
+        "nodes": 68945
+      },
+      {
+        "view": "date",
+        "repeat": 0,
+        "ms": 851.3000000002794,
+        "nodes": 69374
+      },
+      {
+        "view": "type",
+        "repeat": 1,
+        "ms": 698.5,
+        "nodes": 68945
+      },
+      {
+        "view": "date",
+        "repeat": 1,
+        "ms": 785.3999999999069,
+        "nodes": 69374
+      },
+      {
+        "view": "type",
+        "repeat": 2,
+        "ms": 737.8999999999069,
+        "nodes": 68945
+      },
+      {
+        "view": "date",
+        "repeat": 2,
+        "ms": 883.1999999997206,
+        "nodes": 69374
+      }
+    ]
+  },
+  {
+    "count": 10000,
+    "days": 365,
+    "initialMs": 1030.7164,
+    "samples": [
+      {
+        "view": "type",
+        "repeat": 0,
+        "ms": 1415.1000000000931,
+        "nodes": 137277
+      },
+      {
+        "view": "date",
+        "repeat": 0,
+        "ms": 1478.6000000000931,
+        "nodes": 132706
+      },
+      {
+        "view": "type",
+        "repeat": 1,
+        "ms": 1478.2000000001863,
+        "nodes": 137277
+      },
+      {
+        "view": "date",
+        "repeat": 1,
+        "ms": 1591.3000000002794,
+        "nodes": 132706
+      },
+      {
+        "view": "type",
+        "repeat": 2,
+        "ms": 1303,
+        "nodes": 137277
+      },
+      {
+        "view": "date",
+        "repeat": 2,
+        "ms": 1467.1000000000931,
+        "nodes": 132706
+      }
+    ]
+  }
+]

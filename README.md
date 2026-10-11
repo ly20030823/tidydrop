@@ -130,3 +130,5 @@ dotnet run --project tests/TidyDrop.Checks/TidyDrop.Checks.csproj -- artifacts/c
 ## 当前范围
 
 当前面向 Windows，本地按日期和扩展名整理。文件夹按整包项目管理。尚未提供全文搜索、内容识别、自定义分类或自动监控桌面。
+
+[后续开发记录](docs/development-notes.md) 保存了当前功能、旧界面备份位置、大列表性能测试和未来优化方向。性能优化暂缓，待实际使用中遇到卡顿再继续。
