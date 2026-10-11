@@ -25,5 +25,8 @@ try {
         }
     } finally { $sdkZip.Dispose() }
     Copy-Item -LiteralPath README.md -Destination artifacts/release/使用说明.md
+    $documentationPath = Join-Path (Get-Location) 'artifacts/release/docs'
+    New-Item -ItemType Directory -Path $documentationPath -Force | Out-Null
+    Get-ChildItem -LiteralPath docs | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $documentationPath -Recurse -Force }
     Write-Host '构建完成：artifacts/release/TidyDrop.exe'
 } finally { Pop-Location }

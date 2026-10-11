@@ -129,6 +129,145 @@ Check("A locked file inside a folder stops the whole folder before moving", cont
         Assert(!context.Engine.Execute(plan, context.History)[0].Success);
     Assert(File.ReadAllText(child) == "keep" && !Directory.Exists(plan[0].Destination));
 });
+Check("Catalog starts from saved metadata; external changes appear only after manual rebuild", context =>
+{
+    var source = context.File("已收纳.txt", "keep");
+    Assert(context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History)[0].Success);
+    var destination = context.History[0].Destination;
+    var outsideChange = Path.Combine(Path.GetDirectoryName(destination)!, "手动添加.txt");
+    File.WriteAllText(outsideChange, "external");
+    File.Delete(destination);
+    var reopened = new ArchiveCatalog(context.Settings);
+    var cached = reopened.Load(context.History);
+    Assert(cached.Count == 1 && cached[0].Path == destination);
+    var rebuilt = reopened.Load(context.History, rebuild: true);
+    Assert(rebuilt.Count == 1 && rebuilt[0].Path == outsideChange);
+    Assert(new ArchiveCatalog(context.Settings).Load([]).Single().Path == outsideChange);
+});
+Check("Collection and undo update the catalog incrementally for files and whole folders", context =>
+{
+    var first = context.File("报告.txt", "doc");
+    var folder = Path.Combine(context.Folder, "项目");
+    context.File("项目/内部.txt", "inside");
+    Directory.CreateDirectory(Path.Combine(folder, "空目录"));
+    Assert(context.Engine.Execute(context.Engine.Preview([first, folder], context.Settings), context.History).All(result => result.Success));
+    Assert(context.Catalog.Load([]).Count == 2 && context.Catalog.Load([]).Count(item => item.IsDirectory) == 1);
+    var external = Path.Combine(Path.GetDirectoryName(context.History.Single(entry => !entry.IsDirectory).Destination)!, "未核对.txt");
+    File.WriteAllText(external, "external");
+    var next = context.File("新增.txt", "new");
+    Assert(context.Engine.Execute(context.Engine.Preview([next], context.Settings), context.History)[0].Success);
+    Assert(new ArchiveCatalog(context.Settings).Load([]).Count == 3);
+    Assert(context.Engine.Undo(context.History.Single(entry => entry.IsDirectory), context.History).Success);
+    Assert(context.Catalog.Load([]).Count == 2 && File.ReadAllText(Path.Combine(folder, "内部.txt")) == "inside");
+    Assert(context.Catalog.Load(context.History, rebuild: true).Count == 3);
+});
+Check("First catalog migration keeps legacy items and ignores metadata and temporary files", context =>
+{
+    var managed = Path.Combine(context.Settings.RootFolder, "归序", "2026-09", "2026-09-30", "文档", "旧材料.txt");
+    Directory.CreateDirectory(Path.GetDirectoryName(managed)!);
+    File.WriteAllText(managed, "managed");
+    File.WriteAllText(Path.Combine(Path.GetDirectoryName(managed)!, ".tidydrop-partial.tmp"), "temporary");
+    var legacy = Path.Combine(context.Settings.RootFolder, "图片", "旧图.png");
+    Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+    File.WriteAllText(legacy, "old");
+    context.History.Add(new HistoryEntry { Destination = legacy, State = "已归档", RuleName = "图片", Time = new DateTimeOffset(2025, 3, 12, 10, 0, 0, TimeSpan.FromHours(8)) });
+    var migrated = context.Catalog.Load(context.History);
+    Assert(migrated.Count == 2 && migrated.Any(item => item.Path == legacy && item.Date == "2025-03-12"));
+    Assert(File.Exists(CatalogPath(context)) && new ArchiveCatalog(context.Settings).Load([]).Count == 2);
+    Assert(ArchiveLibrary.Read(context.Settings, context.History).Count == 2);
+});
+Check("Relative catalog paths survive moving the complete archive directory", context =>
+{
+    var source = context.File("迁移.txt", "keep");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    var relative = Path.GetRelativePath(context.Settings.RootFolder, context.History[0].Destination);
+    var target = Path.Combine(context.Folder, "迁移后的归档");
+    var fixturePrefix = Path.GetFullPath(context.Folder) + Path.DirectorySeparatorChar;
+    Assert(Path.GetFullPath(context.Settings.RootFolder).StartsWith(fixturePrefix) && Path.GetFullPath(target).StartsWith(fixturePrefix));
+    Directory.Move(context.Settings.RootFolder, target);
+    context.Settings.RootFolder = target;
+    var catalog = new ArchiveCatalog(context.Settings).Load([]);
+    Assert(catalog.Count == 1 && catalog[0].Path == Path.Combine(target, relative));
+    Assert(File.ReadAllText(catalog[0].Path) == "keep");
+});
+Check("Invalid catalogs are backed up and rebuilt; escaping paths cannot enter the catalog", context =>
+{
+    var source = context.File("安全.txt", "safe");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    File.WriteAllText(CatalogPath(context), "broken JSON");
+    Assert(new ArchiveCatalog(context.Settings).Load(context.History).Count == 1);
+    var metadata = Path.GetDirectoryName(CatalogPath(context))!;
+    Assert(Directory.GetFiles(metadata, "catalog.invalid-*.json").Any(path => File.ReadAllText(path) == "broken JSON"));
+    File.WriteAllText(CatalogPath(context), "{\"version\":1,\"items\":[{\"id\":\"bad\",\"relativePath\":\"../outside.txt\",\"category\":\"文档\",\"date\":\"2026-10-11\",\"isDirectory\":false}]}");
+    var recovered = new ArchiveCatalog(context.Settings).Load(context.History);
+    Assert(recovered.Count == 1 && recovered[0].FileName == "安全.txt");
+});
+Check("Interrupted catalog updates rebuild once and include material already moved", context =>
+{
+    var source = context.File("第一份.txt", "first");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    var moved = Path.Combine(Path.GetDirectoryName(context.History[0].Destination)!, "中断后.txt");
+    File.WriteAllText(moved, "moved before catalog commit");
+    File.WriteAllText(PendingPath(context), "interrupted");
+    Assert(new ArchiveCatalog(context.Settings).Load(context.History).Count == 2);
+    Assert(!File.Exists(PendingPath(context)));
+    var laterExternal = Path.Combine(Path.GetDirectoryName(moved)!, "暂未更新.txt");
+    File.WriteAllText(laterExternal, "external");
+    Assert(new ArchiveCatalog(context.Settings).Load(context.History).Count == 2);
+});
+Check("Catalog failure before collection leaves the source in place", context =>
+{
+    Directory.CreateDirectory(context.Settings.RootFolder);
+    context.Catalog.Load([]);
+    var source = context.File("不能更新.txt", "keep");
+    var pending = PendingPath(context);
+    File.WriteAllText(pending, "blocked");
+    using (var locked = new FileStream(pending, FileMode.Open, FileAccess.Read, FileShare.None))
+        Assert(!context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History)[0].Success);
+    Assert(File.ReadAllText(source) == "keep" && context.History.Count == 0);
+});
+Check("Catalog failure after collection keeps the material and a durable repair marker", context =>
+{
+    Directory.CreateDirectory(context.Settings.RootFolder);
+    context.Catalog.Load([]);
+    var source = context.File("已移动.txt", "keep");
+    using (var locked = new FileStream(CatalogPath(context), FileMode.Open, FileAccess.Read, FileShare.Read))
+    {
+        var result = context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History)[0];
+        Assert(result.Success && result.Message.Contains("清单待修复"));
+        Assert(!File.Exists(source) && File.ReadAllText(context.History[0].Destination) == "keep" && File.Exists(PendingPath(context)));
+    }
+    Assert(new ArchiveCatalog(context.Settings).Load(context.History).Count == 1 && !File.Exists(PendingPath(context)));
+});
+Check("Two writers to the same archive preserve both catalog additions", context =>
+{
+    var first = context.File("one.txt", "first");
+    var second = context.File("two.txt", "second");
+    var otherHistory = new List<HistoryEntry>();
+    var other = new Organizer(new Store(Path.Combine(context.Folder, "other-data")), new ArchiveCatalog(context.Settings));
+    var firstPlan = context.Engine.Preview([first], context.Settings);
+    var secondPlan = other.Preview([second], context.Settings);
+    var tasks = new[] {
+        Task.Run(() => context.Engine.Execute(firstPlan, context.History)),
+        Task.Run(() => other.Execute(secondPlan, otherHistory))
+    };
+    Task.WaitAll(tasks);
+    Assert(tasks.All(task => task.Result.Single().Success));
+    Assert(new ArchiveCatalog(context.Settings).Load([]).Count == 2 && !File.Exists(PendingPath(context)));
+});
+Check("Catalog failure after undo leaves restored bytes intact and repairs the removal", context =>
+{
+    var source = context.File("撤销.txt", "keep");
+    context.Engine.Execute(context.Engine.Preview([source], context.Settings), context.History);
+    var destination = context.History[0].Destination;
+    using (var locked = new FileStream(CatalogPath(context), FileMode.Open, FileAccess.Read, FileShare.Read))
+    {
+        var result = context.Engine.Undo(context.History[0], context.History);
+        Assert(result.Success && result.Message.Contains("清单待修复"));
+        Assert(File.ReadAllText(source) == "keep" && !File.Exists(destination) && File.Exists(PendingPath(context)));
+    }
+    Assert(new ArchiveCatalog(context.Settings).Load(context.History).Count == 0 && !File.Exists(PendingPath(context)));
+});
 Check("An exclusively locked source remains untouched", context =>
 {
     var source = context.File("a.txt", "locked");
@@ -221,20 +360,24 @@ void Check(string name, Action<Context> test)
     catch (Exception ex) { failed++; Console.WriteLine("FAIL " + name + ": " + ex); }
 }
 void Assert(bool condition) { if (!condition) throw new Exception("Assertion failed"); }
+string CatalogPath(Context context) => Path.Combine(context.Settings.RootFolder, "归序", ArchiveCatalog.MetadataFolder, ArchiveCatalog.CatalogFile);
+string PendingPath(Context context) => Path.Combine(context.Settings.RootFolder, "归序", ArchiveCatalog.MetadataFolder, ArchiveCatalog.PendingFile);
 
 sealed class Context
 {
     public string Folder { get; }
     public Store Store { get; }
     public Organizer Engine { get; }
+    public ArchiveCatalog Catalog { get; }
     public Settings Settings { get; }
     public List<HistoryEntry> History { get; } = [];
     public Context(string folder)
     {
         Folder = folder;
         Store = new Store(Path.Combine(folder, "data"));
-        Engine = new Organizer(Store);
         Settings = new Settings { RootFolder = Path.Combine(folder, "archive") };
+        Catalog = new ArchiveCatalog(Settings);
+        Engine = new Organizer(Store, Catalog);
     }
     public string File(string relative, string content)
     {

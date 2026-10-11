@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 
 namespace TidyDrop.Core;
 
-public sealed class Organizer(Store store)
+public sealed class Organizer(Store store, ArchiveCatalog? catalog = null)
 {
     private static readonly Dictionary<string, string> Categories = BuildCategories();
 
@@ -68,48 +68,73 @@ public sealed class Organizer(Store store)
 
     public List<OperationResult> Execute(IEnumerable<PlanItem> plan, List<HistoryEntry> history)
     {
+        var planned = plan.ToArray();
         var results = new List<OperationResult>();
-        foreach (var item in plan)
+        var changed = new List<HistoryEntry>();
+        ArchiveCatalog.Mutation? mutation = null;
+        try
         {
-            if (item.Destination is null)
+            if (planned.Any(item => item.CanMove)) mutation = catalog?.BeginMutation(history);
+        }
+        catch (Exception ex)
+        {
+            return planned.Select(item => new OperationResult(item.FileName, false, item.CanMove ? "材料清单无法更新，项目保持原位：" + ex.Message : item.Message)).ToList();
+        }
+        try
+        {
+            foreach (var item in planned)
             {
-                if (!ExpectedSkip(item.Message))
+                if (item.Destination is null)
                 {
-                    history.Insert(0, new HistoryEntry { Source = item.Source, RuleName = item.RuleName, State = "未收纳", Detail = item.Message, IsDirectory = item.IsDirectory });
-                    try { store.SaveHistory(history); }
-                    catch (Exception ex) { results.Add(new(item.FileName, false, item.Message + "；记录保存失败：" + ex.Message)); continue; }
+                    if (!ExpectedSkip(item.Message))
+                    {
+                        history.Insert(0, new HistoryEntry { Source = item.Source, RuleName = item.RuleName, State = "未收纳", Detail = item.Message, IsDirectory = item.IsDirectory });
+                        try { store.SaveHistory(history); }
+                        catch (Exception ex) { results.Add(new(item.FileName, false, item.Message + "；记录保存失败：" + ex.Message)); continue; }
+                    }
+                    results.Add(new(item.FileName, false, item.Message));
+                    continue;
                 }
-                results.Add(new(item.FileName, false, item.Message));
-                continue;
-            }
-            var entry = new HistoryEntry
-            {
-                Source = item.Source, Destination = item.Destination, RuleName = item.RuleName, IsDirectory = item.IsDirectory
-            };
-            try
-            {
-                // Persist the intent before any filesystem change. Never overwrite a destination.
-                history.Insert(0, entry);
-                store.SaveHistory(history);
-                Transfer(item.Source, item.Destination, null, hash =>
+                var entry = new HistoryEntry
                 {
-                    entry.Hash = hash;
+                    Source = item.Source, Destination = item.Destination, RuleName = item.RuleName, IsDirectory = item.IsDirectory
+                };
+                changed.Add(entry);
+                try
+                {
+                    // Persist the intent before any filesystem change. Never overwrite a destination.
+                    history.Insert(0, entry);
                     store.SaveHistory(history);
-                });
-                entry.State = "已归档";
-                entry.Detail = "";
-                store.SaveHistory(history);
-                results.Add(new(item.FileName, true, "已归档"));
+                    Transfer(item.Source, item.Destination, null, hash =>
+                    {
+                        entry.Hash = hash;
+                        store.SaveHistory(history);
+                    });
+                    entry.State = "已归档";
+                    entry.Detail = "";
+                    store.SaveHistory(history);
+                    results.Add(new(item.FileName, true, "已归档"));
+                }
+                catch (Exception ex)
+                {
+                    var completed = !Exists(entry.Source) && HashMatches(entry.Destination, entry.Hash);
+                    entry.State = completed ? "已归档" : "未完成";
+                    entry.Detail = ex.Message;
+                    try { store.SaveHistory(history); }
+                    catch { /* The write-ahead record remains for recovery on next launch. */ }
+                    results.Add(new(item.FileName, completed, completed ? "已归档，记录保存需检查" : "未完成：" + ex.Message));
+                }
             }
+        }
+        finally
+        {
+            try { mutation?.Commit(changed); }
             catch (Exception ex)
             {
-                var completed = !Exists(entry.Source) && HashMatches(entry.Destination, entry.Hash);
-                entry.State = completed ? "已归档" : "未完成";
-                entry.Detail = ex.Message;
-                try { store.SaveHistory(history); }
-                catch { /* The write-ahead record remains for recovery on next launch. */ }
-                results.Add(new(item.FileName, completed, completed ? "已归档，记录保存需检查" : "未完成：" + ex.Message));
+                for (var i = 0; i < results.Count; i++)
+                    if (results[i].Success) results[i] = results[i] with { Message = results[i].Message + "；材料清单待修复：" + ex.Message };
             }
+            finally { mutation?.Dispose(); }
         }
         return results;
     }
@@ -117,17 +142,20 @@ public sealed class Organizer(Store store)
     public OperationResult Undo(HistoryEntry entry, List<HistoryEntry> history)
     {
         if (entry.State != "已归档") return new(entry.FileName, false, "这条记录不能撤销");
+        ArchiveCatalog.Mutation? mutation = null;
+        OperationResult result;
         try
         {
             if (File.Exists(entry.Source) || Directory.Exists(entry.Source))
                 throw new IOException("原位置已有同名文件，撤销已停止，避免覆盖。");
+            mutation = catalog?.BeginMutation(history);
             entry.State = "撤销中";
             store.SaveHistory(history);
             Transfer(entry.Destination, entry.Source, entry.Hash, _ => { });
             entry.State = "已撤销";
             entry.Detail = "";
             store.SaveHistory(history);
-            return new(entry.FileName, true, "已恢复到原位置");
+            result = new(entry.FileName, true, "已恢复到原位置");
         }
         catch (Exception ex)
         {
@@ -135,8 +163,12 @@ public sealed class Organizer(Store store)
                 ? "已撤销" : "已归档";
             entry.Detail = ex.Message;
             try { store.SaveHistory(history); } catch { }
-            return new(entry.FileName, entry.State == "已撤销", ex.Message);
+            result = new(entry.FileName, entry.State == "已撤销", ex.Message);
         }
+        try { mutation?.Commit([entry]); }
+        catch (Exception ex) { result = result with { Message = result.Message + "；材料清单待修复：" + ex.Message }; }
+        finally { mutation?.Dispose(); }
+        return result;
     }
 
     public void Recover(List<HistoryEntry> history)

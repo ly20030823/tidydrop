@@ -39,8 +39,16 @@ try {
     if ([System.IO.File]::ReadAllText($fileEntry.Destination) -ne '中文 shortcut check') { throw '文件内容不一致' }
     if ([System.IO.File]::ReadAllText((Join-Path $folderEntry.Destination '说明.md')) -ne 'nested folder check') { throw '文件夹内容不一致' }
     if (-not (Test-Path -LiteralPath (Join-Path $folderEntry.Destination '空目录'))) { throw '空目录未保留' }
+    $catalogPath = Join-Path $archivePath '归序/.tidydrop/catalog.json'
+    $catalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
+    if ($catalog.version -ne 1 -or $catalog.items.Count -ne 2) { throw '后台材料清单未更新' }
+    foreach ($entry in $catalog.items) {
+        if ([System.IO.Path]::IsPathRooted($entry.relativePath) -or -not (Test-Path -LiteralPath (Join-Path $archivePath $entry.relativePath))) { throw '材料清单路径不正确' }
+    }
+    if (Test-Path -LiteralPath (Join-Path $archivePath '归序/.tidydrop/pending')) { throw '成功收纳后应完成清单提交' }
     Write-Host 'PASS desktop shortcut with Chinese names and spaces'
     Write-Host 'PASS file and folder archive without opening a window'
     Write-Host 'PASS background process exits without loading WebView2'
+    Write-Host 'PASS persistent catalog updated by background collection'
     Write-Host ('Test data: ' + $fixture)
 } finally { Pop-Location }

@@ -13,12 +13,14 @@ public partial class MainWindow : Window
 {
     private readonly Store store;
     private readonly Organizer organizer;
+    private readonly ArchiveCatalog catalog;
     private readonly Settings settings;
     private readonly List<HistoryEntry> history;
     private readonly List<string> queued = [];
     private IReadOnlyList<PlanItem> plan = [];
     private List<FileDisplay> items = [];
     private List<ArchiveItem> library = [];
+    private string libraryRoot = "";
     private bool ready;
     private bool busy;
     private bool initialized;
@@ -31,8 +33,9 @@ public partial class MainWindow : Window
     {
         this.smokeTest = smokeTest;
         store = new Store(Path.Combine(AppContext.BaseDirectory, smokeTest ? "smoke-data" : "data"));
-        organizer = new Organizer(store);
-        settings = smokeTest ? new Settings { RootFolder = @"D:\我的材料" } : store.LoadSettings();
+        settings = smokeTest ? new Settings { RootFolder = Path.Combine(AppContext.BaseDirectory, "smoke-initial", Guid.NewGuid().ToString("N")) } : store.LoadSettings();
+        catalog = new ArchiveCatalog(settings);
+        organizer = new Organizer(store, catalog);
         history = smokeTest ? [] : store.LoadHistory();
         if (!smokeTest) organizer.Recover(history);
         InitializeComponent();
@@ -129,7 +132,7 @@ public partial class MainWindow : Window
                     var sourcePicker = new OpenFolderDialog { Title = "选择要整包收纳的文件夹" };
                     if (sourcePicker.ShowDialog(this) == true) HandleIncomingPaths([sourcePicker.FolderName]);
                     break;
-                case "refreshLibrary": await RefreshLibrary(); break;
+                case "refreshLibrary": await RefreshLibrary(rebuild: true); await ProcessQueued(); break;
                 case "reveal":
                     var archiveId = root.GetProperty("id").GetString();
                     var archive = library.FirstOrDefault(item => item.Id == archiveId);
@@ -137,7 +140,7 @@ public partial class MainWindow : Window
                     {
                         await ExplorerNavigation.RevealAsync(archive.Path);
                     }
-                    else Notify("这个项目已被移走，请刷新归档空间。", true);
+                    else Notify("这个项目已被移走，请点击「更新清单」。", true);
                     break;
                 case "saveSettings":
                     var requested = root.GetProperty("settings");
@@ -189,7 +192,7 @@ public partial class MainWindow : Window
         {
             if (!smokeTest && !IsVisible && !busy && queued.Count == 0)
             {
-                if (isError) MessageBox.Show("部分项目未收纳，请打开归序查看整理记录。\n" + message, "归序");
+                if (isError) MessageBox.Show("请打开归序查看整理结果。\n" + message, "归序");
                 Application.Current.Shutdown(isError ? 1 : 0);
             }
         }
@@ -276,14 +279,26 @@ public partial class MainWindow : Window
         }, JsonOptions));
     }
 
-    private async Task RefreshLibrary()
+    private async Task RefreshLibrary(bool rebuild = false)
     {
-        // Snapshot records before the worker starts; ongoing operations may update history.
-        var records = history.ToArray();
-        var current = new Settings { RootFolder = settings.RootFolder };
-        try { library = await Task.Run(() => ArchiveLibrary.Read(current, records)); }
-        catch (Exception ex) { library = []; message = "归档空间读取未完成：" + ex.Message; isError = true; }
+        busy = true;
+        if (rebuild) { message = "正在核对归档目录，更新材料清单…"; isError = false; }
         SendState();
+        var records = history.ToArray();
+        try
+        {
+            var loaded = await Task.Run(() => catalog.Load(records, rebuild));
+            library = loaded;
+            libraryRoot = settings.RootFolder;
+            if (rebuild) message = $"材料清单已更新，共 {library.Count} 份材料。";
+        }
+        catch (Exception ex)
+        {
+            if (!libraryRoot.Equals(settings.RootFolder, StringComparison.OrdinalIgnoreCase)) library = [];
+            message = "材料清单读取未完成：" + ex.Message;
+            isError = true;
+        }
+        finally { busy = false; SendState(); }
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)
@@ -352,8 +367,10 @@ public partial class MainWindow : Window
             AddLibrarySample(DateTime.Today.AddDays(-1), "文档", "阶段计划.txt");
             AddLibrarySample(DateTime.Today.AddDays(-1), "图片", "设计参考.png");
             AddLibrarySample(DateTime.Today.AddMonths(-1), "压缩包", "历史材料.zip");
-            await RefreshLibrary();
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"更新材料清单\"]').click()");
             await CheckScript("document.querySelectorAll('.archive-row').length === 6 && document.querySelectorAll('.timeline-day').length === 3");
+            await WaitUntil(() => Task.FromResult(!busy));
+            if (new ArchiveCatalog(settings).Load(history).Count != 6) throw new IOException("Manual catalog update was not persisted.");
             await Task.Delay(150);
             using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-preview.png")))
                 await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
@@ -405,7 +422,7 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '撤销').click()");
             await WaitUntil(() => Task.FromResult(!busy && history.All(entry => entry.State == "已撤销")));
             if (File.ReadAllText(source) != "React bridge check 中文") throw new IOException("Bridge undo check failed.");
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\n");
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\n");
             Application.Current.Shutdown(0);
         }
         catch (Exception ex) { Fail(ex); }

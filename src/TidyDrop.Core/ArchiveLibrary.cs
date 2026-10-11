@@ -16,7 +16,7 @@ public static class ArchiveLibrary
                 result[entry.Destination] = new(entry.Id, Path.GetFileName(entry.Destination), entry.Destination, entry.RuleName, entry.Time.ToLocalTime().ToString("yyyy-MM-dd"), Directory.Exists(entry.Destination));
         var managed = Path.Combine(root, "归序");
         if (!Directory.Exists(managed) || IsLink(managed)) return result.Values.OrderByDescending(x => x.Date).ToList();
-        foreach (var month in Directory.EnumerateDirectories(managed).Where(p => !IsLink(p)))
+        foreach (var month in Directory.EnumerateDirectories(managed).Where(p => Path.GetFileName(p) != ArchiveCatalog.MetadataFolder && !IsLink(p)))
         foreach (var day in Directory.EnumerateDirectories(month).Where(p => !IsLink(p)))
         {
             var date = Path.GetFileName(day);

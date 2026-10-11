@@ -11,7 +11,7 @@ internal static class ExplorerNavigation
     {
         var fullPath = Path.GetFullPath(path);
         if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
-            throw new FileNotFoundException("这份材料已被移走，请刷新归档空间。", fullPath);
+            throw new FileNotFoundException("这份材料已被移走，请点击「更新清单」。", fullPath);
 
         var initialized = CoInitializeEx(IntPtr.Zero, 0);
         IntPtr item = IntPtr.Zero;

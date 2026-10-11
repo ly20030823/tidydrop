@@ -53,7 +53,7 @@ export function ArchiveBrowser({ library, rootFolder, busy, send, onOrganize }: 
         <button className={view === 'type' ? 'selected' : ''} aria-pressed={view === 'type'} onClick={() => setView('type')}><LayoutGrid size={16} />按类型</button>
       </div>
       <label className="search-box"><Search size={16} /><input aria-label="搜索归档空间" placeholder="搜索材料名称或路径" value={search} onChange={e => setSearch(e.target.value)} />{search && <button className="clear-search" aria-label="清空搜索" onClick={() => setSearch('')}><X size={13} /></button>}</label>
-      <button className="button subtle" disabled={busy} onClick={() => send({ command: 'refreshLibrary' })}><RefreshCw size={14} />刷新</button>
+      <button className="button subtle" aria-label="更新材料清单" title="扫描归档目录，核对并更新材料清单" disabled={busy} onClick={() => send({ command: 'refreshLibrary' })}><RefreshCw size={14} />更新清单</button>
       <button className="button primary" onClick={onOrganize}><ArrowDownToLine size={15} />收纳新材料</button>
     </div>
     <div className="browse-summary"><div><h2>{view === 'date' ? '按天回顾收下的材料' : '从分类里找到需要的材料'}</h2><p>{view === 'date' ? `共 ${library.length} 份材料，分布在 ${dates.length} 个收纳日` : '选择一张分类卡片，可跨日期查看同类材料'}</p></div>{hasFilters && <button className="reset-filters" onClick={reset}><X size={13} />清除筛选</button>}</div>
