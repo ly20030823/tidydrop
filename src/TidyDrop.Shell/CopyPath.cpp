@@ -87,7 +87,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetToolTip(IShellItemArray*, PWSTR* tip) override { return tip ? SHStrDupW(L"复制完整路径，不带引号；多选时每行一个", tip) : E_POINTER; }
     HRESULT STDMETHODCALLTYPE GetCanonicalName(GUID* name) override { if (!name) return E_POINTER; *name = CopyPathClsid; return S_OK; }
-    HRESULT STDMETHODCALLTYPE GetState(IShellItemArray* items, BOOL, EXPCMDSTATE* state) override {
+    HRESULT STDMETHODCALLTYPE GetState(IShellItemArray* items, BOOL okToBeSlow, EXPCMDSTATE* state) override {
         if (!state) return E_POINTER;
         *state = ECS_HIDDEN;
         DWORD count = 0;
@@ -96,8 +96,21 @@ public:
         if (FAILED(items->GetItemAt(0, &first))) return S_OK;
         SFGAOF attributes = 0;
         const HRESULT hr = first->GetAttributes(SFGAO_FILESYSTEM, &attributes);
+        if (SUCCEEDED(hr)) {
+            if (attributes & SFGAO_FILESYSTEM) *state = ECS_ENABLED;
+        } else if (!okToBeSlow) {
+            // Explorer can initially supply an item whose attributes aren't ready.
+            // Ask for the deferred query instead of permanently hiding the command.
+            first->Release();
+            return E_PENDING;
+        } else {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(first->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                *state = ECS_ENABLED;
+                CoTaskMemFree(path);
+            }
+        }
         first->Release();
-        if (SUCCEEDED(hr) && (attributes & SFGAO_FILESYSTEM)) *state = ECS_ENABLED;
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE Invoke(IShellItemArray* items, IBindCtx*) override { return CopySelection(items); }

@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('status','install','remove','trust-install','trust-remove')][string]$Action = 'status',
+    [ValidateSet('status','inventory','install','repair','remove','trust-install','trust-remove')][string]$Action = 'status',
     [switch]$TrustConsent,
     [switch]$IfBoundHere
 )
@@ -11,7 +11,7 @@ $ProgressPreference = 'SilentlyContinue'
 $env:PSModulePath = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\Modules'
 $packageName = 'TidyDrop.CopyPath'
 $publisher = 'CN=TidyDrop Local Development'
-$packageVersion = '0.6.1.0'
+$packageVersion = '0.6.2.0'
 $appDirectory = Split-Path $PSScriptRoot -Parent
 $marker = 'HKCU:\Software\TidyDrop\CopyPathMenu'
 $machineMarker = 'HKLM:\SOFTWARE\TidyDrop\CopyPathTrust'
@@ -31,7 +31,36 @@ function Test-MachineTrust($Certificate) {
 function Get-MenuStatus {
     $packages = if ($supported) { @(Get-MenuPackage) } else { @() }
     $installed = $packages.Count -gt 0
-    return @{ supported=$supported; available=$available; installed=$installed; checked=$true; detail=$(if ($installed) { '已添加到 Windows 11 右键菜单' } elseif (-not $supported) { '此功能需要 Windows 11 的 x64 系统' } elseif (-not $available) { '此版本未包含已签名的菜单组件' } else { '文件和文件夹都能用，多选时每行一个路径，不带引号' }) }
+    $binding = Get-ItemProperty -LiteralPath $marker -ErrorAction SilentlyContinue
+    $detail = if ($installed) {
+        if (-not ($packages | Where-Object { $_.Version.ToString() -eq $packageVersion })) { '已安装的菜单组件版本不同，可点击「修复归序菜单」更新。' }
+        elseif ($binding.ExternalLocation -ne $appDirectory) { '菜单绑定到另一处归序，可点击「修复归序菜单」绑定到当前程序。' }
+        else { '已注册到当前账户，覆盖桌面和文件夹中的文件、文件夹。' }
+    } elseif (-not $supported) { '此功能需要 Windows 11 的 x64 系统' } elseif (-not $available) { '此版本未包含已签名的菜单组件' } else { '文件和文件夹都能用，多选时每行一个路径，不带引号' }
+    return @{ supported=$supported; available=$available; installed=$installed; checked=$true; detail=$detail }
+}
+function Get-PackagedMenus {
+    $entries = @(); $skipped = 0
+    foreach ($package in @(Get-AppxPackage -ErrorAction Stop)) {
+        if ($package.Name -eq $packageName) { continue }
+        try {
+            $manifest = Get-AppxPackageManifest $package -ErrorAction Stop
+            foreach ($extension in $manifest.SelectNodes("//*[local-name()='Extension' and @Category='windows.fileExplorerContextMenus']")) {
+                foreach ($item in $extension.SelectNodes(".//*[local-name()='ItemType']")) {
+                    foreach ($verb in $item.SelectNodes("./*[local-name()='Verb']")) {
+                        $type = [string]$item.Type
+                        $scope = switch ($type) { '*' {'所有文件'} 'Directory' {'文件夹'} 'Directory\Background' {'空白处'} 'DesktopBackground' {'空白处'} 'Drive' {'磁盘'} default {'特定类型 · ' + $type} }
+                        $entries += @{ id=('package:' + $package.PackageFullName + ':' + $type + ':' + $verb.Id); title=[string]$verb.Id; source=[string]$package.Name; scope=$scope; kind='一级菜单'; enabled=$true; canToggle=$false; managed=$false; detail='已注册的一级菜单组件；显示与开关由所属软件管理，可能包含多个命令。' }
+                    }
+                }
+            }
+        } catch { $skipped++ }
+    }
+    return @{ entries=@($entries); detail=$(if ($skipped -gt 0) { "$skipped 个应用的菜单信息无法读取；已显示其余可读取的项目。" } else { '' }) }
+}
+function Notify-Shell {
+    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class TidyDropShellNotify { [DllImport("shell32.dll")] public static extern void SHChangeNotify(int eventId, uint flags, IntPtr a, IntPtr b); }'
+    [TidyDropShellNotify]::SHChangeNotify(0x08000000, 0x1000, [IntPtr]::Zero, [IntPtr]::Zero)
 }
 function Read-VerifiedCertificate {
     if (-not $available) { throw '需要 Windows 11 x64 和随程序提供的已签名菜单组件。' }
@@ -75,7 +104,12 @@ function Remove-LegacyUserTrust {
 $guard = $null; $locked = $false; $certificate = $null
 $addedMachineTrust = $false; $oldOwned = @()
 try {
-    if ($Action -in @('install','remove')) {
+    if ($Action -eq 'inventory') {
+        $inventory = Get-PackagedMenus
+        @{ ok=$true; entries=@($inventory.entries); detail=$inventory.detail } | ConvertTo-Json -Depth 6 -Compress
+        exit 0
+    }
+    if ($Action -in @('install','repair','remove')) {
         $guard = [Threading.Mutex]::new($false, 'Local\TidyDrop.CopyPath.Setup')
     } elseif ($Action -like 'trust-*') {
         if (-not $TrustConsent) { throw '本机证书信任修改需要明确授权。' }
@@ -115,7 +149,7 @@ try {
             if (Test-Path -LiteralPath $machineMarker) { Remove-Item -LiteralPath $machineMarker -Force }
         }
     }
-    elseif ($Action -eq 'install') {
+    elseif ($Action -in @('install','repair')) {
         $certificate = Read-VerifiedCertificate
         $packages = @(Get-MenuPackage)
         if (-not (Test-MachineTrust $certificate)) {
@@ -126,7 +160,7 @@ try {
         $previous = Get-ItemProperty -LiteralPath $marker -ErrorAction SilentlyContinue
         $sameVersion = @($packages | Where-Object { $_.Version.ToString() -eq $packageVersion })
         $sameLocation = $previous -and $previous.ExternalLocation -eq $appDirectory
-        if (-not ($sameVersion.Count -gt 0 -and $sameLocation)) {
+        if ($Action -eq 'repair' -or -not ($sameVersion.Count -gt 0 -and $sameLocation)) {
             if ($sameVersion.Count -gt 0) { foreach ($package in $sameVersion) { Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop } }
             try { Add-AppxPackage -Path (Join-Path $PSScriptRoot 'TidyDrop.CopyPath.msix') -ExternalLocation $appDirectory -ErrorAction Stop }
             catch {
@@ -155,6 +189,7 @@ try {
         if (@($owned.OwnedTrustThumbprints | Where-Object { $_ }).Count -gt 0) { Invoke-TrustHelper 'trust-remove' }
         if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
     }
+    if ($Action -in @('install','repair','remove')) { Notify-Shell }
     if ($Action -like 'trust-*') { @{ ok=$true } | ConvertTo-Json -Compress }
     else { @{ ok=$true; status=(Get-MenuStatus) } | ConvertTo-Json -Depth 4 -Compress }
 }

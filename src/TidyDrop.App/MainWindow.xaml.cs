@@ -28,6 +28,10 @@ public partial class MainWindow : Window
     private string message = "";
     private ContextMenuStatus contextMenu = ShellIntegration.InitialStatus();
     private int contextMenuRevision;
+    private readonly MenuRegistry menuRegistry = new();
+    private List<MenuEntry> systemMenus = [];
+    private bool menusLoading;
+    private string menusDetail = "";
     private readonly bool smokeTest;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -140,6 +144,10 @@ public partial class MainWindow : Window
                 case "contextMenuStatus": await UpdateContextMenuStatus(); break;
                 case "installContextMenu": await ChangeContextMenu(true); break;
                 case "removeContextMenu": await ChangeContextMenu(false); break;
+                case "repairContextMenu": await ChangeContextMenu(true, true); break;
+                case "systemMenus": await RefreshSystemMenus(); break;
+                case "toggleSystemMenu": await ToggleSystemMenu(root.GetProperty("id").GetString() ?? "", root.GetProperty("enabled").GetBoolean()); break;
+                case "restoreSystemMenus": await RestoreSystemMenus(); break;
                 case "reveal":
                     var archiveId = root.GetProperty("id").GetString();
                     var archive = library.FirstOrDefault(item => item.Id == archiveId);
@@ -282,7 +290,7 @@ public partial class MainWindow : Window
         Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
         {
             type = "state",
-            state = new { settings, items, history, library, contextMenu, busy, message, isError, pendingCount = queued.Count }
+            state = new { settings, items, history, library, contextMenu, systemMenus, menusLoading, menusDetail, busy, message, isError, pendingCount = queued.Count }
         }, JsonOptions));
     }
 
@@ -323,18 +331,18 @@ public partial class MainWindow : Window
         SendState();
     }
 
-    private async Task ChangeContextMenu(bool install)
+    private async Task ChangeContextMenu(bool install, bool repair = false)
     {
         if (!smokeTest && install && ShellIntegration.NeedsLocalTrust()
             && MessageBox.Show(this, "此个人开发版需要 Windows 信任随附的归序签名，才能添加一级右键菜单。\n\n继续会请求管理员确认，将公开证书加入本机的「受信任人」证书库。此信任对所有账户生效，也适用于同一私钥签名的其他安装包；菜单仅注册给当前账户。不会加入根证书库。\n\n移除菜单时会清理归序新增的信任；其他账户仍使用此菜单时保留。\n\n是否信任归序签名并添加菜单？", "添加复制路径菜单", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         ++contextMenuRevision;
         busy = true; isError = false;
-        message = install ? "正在添加右键菜单…" : "正在移除右键菜单…";
+        message = repair ? "正在重新注册并刷新归序菜单…" : install ? "正在添加右键菜单…" : "正在移除右键菜单…";
         SendState();
         try
         {
-            contextMenu = await RunContextMenuAction(install ? "install" : "remove");
-            message = install ? "已添加「复制文件路径」。在文件或文件夹上右键即可使用，无需打开归序。" : "归序的右键菜单已移除。";
+            contextMenu = await RunContextMenuAction(repair ? "repair" : install ? "install" : "remove");
+            message = install ? "已注册「复制文件路径」并通知 Windows 刷新。若文件夹内仍不显示，请关闭并重开文件夹窗口；仍无效时退出并重新登录 Windows。" : "归序的右键菜单已移除。";
         }
         catch (Exception ex)
         {
@@ -345,8 +353,69 @@ public partial class MainWindow : Window
     }
 
     private Task<ContextMenuStatus> RunContextMenuAction(string action) => smokeTest
-        ? Task.FromResult(contextMenu with { Installed = action == "status" ? contextMenu.Installed : action == "install", Checked = true })
+        ? Task.FromResult(contextMenu with { Installed = action == "status" ? contextMenu.Installed : action is "install" or "repair", Checked = true })
         : ShellIntegration.RunAsync(action);
+
+    private async Task RefreshSystemMenus()
+    {
+        if (menusLoading) return;
+        menusLoading = true; menusDetail = ""; SendState();
+        try
+        {
+            if (smokeTest)
+            {
+                if (systemMenus.Count == 0) systemMenus = [new("fixture-menu", "测试软件菜单", "界面检查", "所有文件", "更多选项", true, true, false, "模拟项目，不修改系统。")];
+                return;
+            }
+            var registry = Task.Run(menuRegistry.Scan);
+            var packaged = ShellIntegration.InventoryAsync();
+            // Await both, including failures, before publishing a complete or partial result.
+            try { systemMenus = await registry; }
+            catch (Exception ex) { systemMenus = []; menusDetail = "部分传统菜单无法读取：" + ex.Message; }
+            try { var result = await packaged; systemMenus.AddRange(result.Entries); menusDetail += result.Detail; }
+            catch (Exception ex) { menusDetail += "一级菜单暂未读取：" + ex.Message; }
+        }
+        finally { menusLoading = false; SendState(); }
+    }
+
+    private async Task ToggleSystemMenu(string id, bool enabled)
+    {
+        if (menusLoading) return;
+        busy = true; isError = false; message = enabled ? "正在恢复菜单…" : "正在停用菜单…"; SendState();
+        try
+        {
+            if (smokeTest) systemMenus = systemMenus.Select(e => e.Id == id ? e with { Enabled = enabled, Managed = !enabled } : e).ToList();
+            else { await Task.Run(() => menuRegistry.SetEnabled(id, enabled)); ShellIntegration.NotifyShell(); }
+            await RefreshSystemMenus();
+            message = enabled ? "菜单已恢复。请重新打开右键菜单。" : "菜单已为当前账户停用，可在这里恢复。若仍显示，请重开文件夹窗口或退出并重新登录 Windows。";
+        }
+        catch (Exception ex) { message = "菜单未更改：" + ex.Message; isError = true; await RefreshSystemMenus(); }
+        finally { busy = false; SendState(); await ProcessQueued(); }
+    }
+
+    private async Task RestoreSystemMenus()
+    {
+        if (menusLoading) return;
+        busy = true; isError = false; message = "正在恢复归序停用的菜单…"; SendState();
+        try
+        {
+            var errors = new List<string>();
+            if (smokeTest) systemMenus = systemMenus.Select(e => e.Managed ? e with { Enabled = true, Managed = false } : e).ToList();
+            else
+            {
+                await Task.Run(() =>
+                {
+                    foreach (var entry in menuRegistry.Scan().Where(e => e.Managed).ToList())
+                        try { menuRegistry.SetEnabled(entry.Id, true); } catch (Exception ex) { errors.Add(entry.Title + "：" + ex.Message); }
+                });
+                ShellIntegration.NotifyShell();
+            }
+            await RefreshSystemMenus();
+            isError = errors.Count > 0;
+            message = errors.Count == 0 ? "归序停用的菜单已恢复。" : "部分项目未恢复：" + string.Join("；", errors);
+        }
+        finally { busy = false; SendState(); await ProcessQueued(); }
+    }
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
@@ -390,10 +459,22 @@ public partial class MainWindow : Window
             await WaitUntil(() => Task.FromResult(settings.AutoOrganize));
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"拖入后自动整理\"]').click()");
             await WaitUntil(() => Task.FromResult(!settings.AutoOrganize));
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"打开右键菜单管理\"]').click()");
+            await CheckScript("document.querySelector('#menu-title')?.textContent === '右键菜单管理' && document.querySelector('.system-menu-row') !== null");
+            await Browser.ExecuteScriptAsync("document.querySelector('.system-menu-row [role=switch]').click()");
+            await CheckScript("document.querySelector('.system-menu-row [role=switch]')?.getAttribute('aria-checked') === 'false'");
+            await Browser.ExecuteScriptAsync("document.querySelector('.menu-restore').click()");
+            await CheckScript("document.querySelector('.system-menu-row [role=switch]')?.getAttribute('aria-checked') === 'true'");
+            using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-menu-manager.png")))
+                await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"添加复制路径菜单\"]').click()");
+            await CheckScript("document.querySelector('[aria-label=\"移除复制路径菜单\"]') !== null");
+            await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('修复归序菜单')).click()");
             await CheckScript("document.querySelector('[aria-label=\"移除复制路径菜单\"]') !== null");
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"移除复制路径菜单\"]').click()");
             await CheckScript("document.querySelector('[aria-label=\"添加复制路径菜单\"]') !== null");
+            await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"关闭右键菜单管理\"]').click()");
+            await CheckScript("document.querySelector('#menu-title') === null");
             var source = Path.Combine(testDirectory, "桥接 检查, 终稿.txt");
             File.WriteAllText(source, "React bridge check 中文");
             DesktopShortcut.Create(testDirectory);

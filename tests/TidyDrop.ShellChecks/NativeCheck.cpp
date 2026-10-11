@@ -34,9 +34,73 @@ static std::wstring ClipboardText() {
     if (text) GlobalUnlock(value);
     CloseClipboard(); return result;
 }
+// Metadata may not be ready during Explorer's fast GetState call.
+class PendingItem final : public IShellItem {
+    LONG refs_ = 1;
+    ComPtr<IShellItem> inner_;
+public:
+    explicit PendingItem(IShellItem* item) : inner_(item) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override {
+        if (!value) return E_POINTER;
+        *value = nullptr;
+        if (iid != IID_IUnknown && iid != IID_IShellItem) return E_NOINTERFACE;
+        *value = static_cast<IShellItem*>(this); AddRef(); return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs_); }
+    ULONG STDMETHODCALLTYPE Release() override { const auto count = InterlockedDecrement(&refs_); if (!count) delete this; return count; }
+    HRESULT STDMETHODCALLTYPE BindToHandler(IBindCtx* c, REFGUID h, REFIID i, void** v) override { return inner_->BindToHandler(c,h,i,v); }
+    HRESULT STDMETHODCALLTYPE GetParent(IShellItem** v) override { return inner_->GetParent(v); }
+    HRESULT STDMETHODCALLTYPE GetDisplayName(SIGDN n, PWSTR* v) override { return inner_->GetDisplayName(n,v); }
+    HRESULT STDMETHODCALLTYPE GetAttributes(SFGAOF, SFGAOF*) override { return E_FAIL; }
+    HRESULT STDMETHODCALLTYPE Compare(IShellItem* o, SICHINTF h, int* v) override { return inner_->Compare(o,h,v); }
+};
+class PendingSelection final : public IShellItemArray {
+    LONG refs_ = 1;
+    ComPtr<IShellItem> item_;
+public:
+    explicit PendingSelection(IShellItem* item) { item_.Attach(new PendingItem(item)); }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override {
+        if (!value) return E_POINTER; *value = nullptr;
+        if (iid != IID_IUnknown && iid != IID_IShellItemArray) return E_NOINTERFACE;
+        *value = static_cast<IShellItemArray*>(this); AddRef(); return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs_); }
+    ULONG STDMETHODCALLTYPE Release() override { const auto count = InterlockedDecrement(&refs_); if (!count) delete this; return count; }
+    HRESULT STDMETHODCALLTYPE GetCount(DWORD* v) override { if (!v) return E_POINTER; *v = 1; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetItemAt(DWORD index, IShellItem** v) override { if (!v) return E_POINTER; *v = nullptr; if (index) return E_INVALIDARG; return item_.CopyTo(v); }
+    HRESULT STDMETHODCALLTYPE BindToHandler(IBindCtx*, REFGUID, REFIID, void**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetPropertyStore(GETPROPERTYSTOREFLAGS, REFIID, void**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetPropertyDescriptionList(REFPROPERTYKEY, REFIID, void**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetAttributes(SIATTRIBFLAGS, SFGAOF, SFGAOF*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE EnumItems(IEnumShellItems**) override { return E_NOTIMPL; }
+};
 int wmain(int argc, wchar_t** argv) {
     if (argc < 3) return 2;
     Check(OleInitialize(nullptr));
+    if (argc > 3 && std::wstring(argv[3]) == L"--find-verb") {
+        int result = 3;
+        PIDLIST_ABSOLUTE id = nullptr;
+        HMENU menu = CreatePopupMenu();
+        try {
+            Check(SHParseDisplayName(argv[1], nullptr, &id, 0, nullptr));
+            ComPtr<IShellFolder> parent;
+            PCUITEMID_CHILD child = nullptr;
+            Check(SHBindToParent(id, IID_PPV_ARGS(&parent), &child));
+            ComPtr<IContextMenu> context;
+            Check(parent->GetUIObjectOf(nullptr, 1, &child, IID_IContextMenu, nullptr, reinterpret_cast<void**>(context.GetAddressOf())));
+            const auto hr = context->QueryContextMenu(menu, 0, 1, 0x7fff, CMF_NORMAL);
+            Check(hr);
+            const auto count = static_cast<UINT>(HRESULT_CODE(hr));
+            for (UINT command = 0; command < count; ++command) {
+                wchar_t verb[512] = {};
+                if (SUCCEEDED(context->GetCommandString(command, GCS_VERBW, nullptr, reinterpret_cast<LPSTR>(verb), 512)) && _wcsicmp(verb, argv[2]) == 0) { result = 0; break; }
+            }
+        } catch (const std::exception& ex) { std::cerr << ex.what() << "\n"; result = 1; }
+        if (menu) DestroyMenu(menu);
+        CoTaskMemFree(id);
+        OleUninitialize();
+        return result;
+    }
     ComPtr<IDataObject> before;
     Check(OleGetClipboard(&before));
     HMODULE dll = nullptr;
@@ -79,6 +143,13 @@ int wmain(int argc, wchar_t** argv) {
             if (ClipboardText() != path) throw std::runtime_error("Copied path differs or contains quotes");
         }
         std::cout << "PASS Unicode files, folders, spaces, commas, and shell metacharacters without quotes\n";
+        auto regular = Selection({file});
+        ComPtr<IShellItem> regularItem; Check(regular->GetItemAt(0, &regularItem));
+        ComPtr<IShellItemArray> pending; pending.Attach(new PendingSelection(regularItem.Get()));
+        if (command->GetState(pending.Get(), FALSE, &state) != E_PENDING) throw std::runtime_error("Transient metadata failure hides the command");
+        Check(command->GetState(pending.Get(), TRUE, &state));
+        if (state != ECS_ENABLED) throw std::runtime_error("Deferred filesystem-path query does not enable command");
+        std::cout << "PASS deferred metadata and filesystem-path fallback in Explorer\n";
         auto multiple = Selection({file, folder, special});
         Check(command->Invoke(multiple.Get(), nullptr));
         if (ClipboardText() != file + L"\r\n" + folder + L"\r\n" + special) throw std::runtime_error("Multi-selection order/line breaks differ");

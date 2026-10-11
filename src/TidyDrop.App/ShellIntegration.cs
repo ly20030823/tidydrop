@@ -30,9 +30,26 @@ internal static class ShellIntegration
 
     public static async Task<ContextMenuStatus> RunAsync(string action)
     {
-        if (action is not ("status" or "install" or "remove")) throw new ArgumentException("未知菜单操作。");
+        if (action is not ("status" or "install" or "repair" or "remove")) throw new ArgumentException("未知菜单操作。");
+        if (!File.Exists(Path.Combine(AppContext.BaseDirectory, "Shell", "context-menu.ps1"))) return InitialStatus() with { Checked = true, Detail = "此版本未包含菜单组件" };
+        using var result = await RunScript(action);
+        return result.RootElement.GetProperty("status").Deserialize<ContextMenuStatus>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new IOException("无法读取菜单状态。");
+    }
+
+    public static async Task<(List<MenuEntry> Entries, string Detail)> InventoryAsync()
+    {
+        using var result = await RunScript("inventory");
+        return (result.RootElement.GetProperty("entries").Deserialize<List<MenuEntry>>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [], result.RootElement.GetProperty("detail").GetString() ?? "");
+    }
+
+    public static void NotifyShell() => SHChangeNotify(0x08000000, 0x1000, IntPtr.Zero, IntPtr.Zero);
+    [DllImport("shell32.dll")]
+    private static extern void SHChangeNotify(int eventId, uint flags, IntPtr a, IntPtr b);
+
+    private static async Task<JsonDocument> RunScript(string action)
+    {
         var script = Path.Combine(AppContext.BaseDirectory, "Shell", "context-menu.ps1");
-        if (!File.Exists(script)) return InitialStatus() with { Checked = true, Detail = "此版本未包含菜单组件" };
+        if (!File.Exists(script)) throw new IOException("此版本未包含菜单管理组件。");
         var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"))
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
@@ -40,7 +57,7 @@ internal static class ShellIntegration
         };
         foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", script, "-Action", action }) start.ArgumentList.Add(argument);
         // Installation callers obtain explicit consent before the script requests UAC elevation.
-        if (action == "install") start.ArgumentList.Add("-TrustConsent");
+        if (action is "install" or "repair") start.ArgumentList.Add("-TrustConsent");
         using var process = Process.Start(start) ?? throw new IOException("无法启动菜单组件注册。");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
@@ -48,8 +65,8 @@ internal static class ShellIntegration
         var text = await output;
         var errors = await error;
         if (string.IsNullOrWhiteSpace(text)) throw new IOException(string.IsNullOrWhiteSpace(errors) ? "Windows 未返回菜单注册结果。" : errors.Trim());
-        using var result = JsonDocument.Parse(text);
-        if (!result.RootElement.GetProperty("ok").GetBoolean()) throw new IOException(result.RootElement.GetProperty("error").GetString());
-        return result.RootElement.GetProperty("status").Deserialize<ContextMenuStatus>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new IOException("无法读取菜单状态。");
+        var result = JsonDocument.Parse(text);
+        if (!result.RootElement.GetProperty("ok").GetBoolean()) { var detail = result.RootElement.GetProperty("error").GetString(); result.Dispose(); throw new IOException(detail); }
+        return result;
     }
 }
