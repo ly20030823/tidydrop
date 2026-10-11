@@ -12,7 +12,7 @@ type Settings = { rootFolder: string; dateFolders: boolean; autoOrganize: boolea
 type FileItem = { source: string; fileName: string; category: string; destination: string; status: string; canMove: boolean };
 type History = { id: string; time: string; source: string; destination: string; fileName: string; ruleName: string; state: string; detail: string };
 type ContextMenu = { supported: boolean; available: boolean; installed: boolean; checked: boolean; detail: string };
-type Snapshot = { settings: Settings; items: FileItem[]; history: History[]; library: ArchiveItem[]; contextMenu: ContextMenu; systemMenus: MenuEntry[]; menuAnalysis?: MenuAnalysis; menusLoading: boolean; menusNaming?: boolean; menusDetail: string; busy: boolean; message: string; isError: boolean; pendingCount: number };
+type Snapshot = { settings: Settings; items: FileItem[]; history: History[]; library: ArchiveItem[]; contextMenu: ContextMenu; systemMenus: MenuEntry[]; menuAnalysis?: MenuAnalysis; menusLoading: boolean; menusDetail: string; busy: boolean; message: string; isError: boolean; pendingCount: number };
 type Message = { command: string; [key: string]: unknown };
 type WebView = { postMessage(message: Message): void; postMessageWithAdditionalObjects(message: Message, files: File[]): void; addEventListener(name: 'message', handler: (event: MessageEvent) => void): void; removeEventListener(name: 'message', handler: (event: MessageEvent) => void): void };
 declare global { interface Window { chrome?: { webview?: WebView } } }
@@ -77,14 +77,14 @@ function App() {
   const subtitle = page === 'library' ? '记得是哪一天，就按日期回顾；记得是什么材料，就从分类找起。' : page === 'organize' ? '拖入文件，剩下的交给归序。' : page === 'history' ? '查看文件去向，也可以把它送回原来的位置。' : '只需选好一个总文件夹，我们会照顾好里面的分类。';
 
   return <div className="app-shell" onDragOver={event => event.preventDefault()} onDrop={drop}>
-    {menuManager && <MenuManager entries={snapshot.systemMenus} analysis={snapshot.menuAnalysis} naming={snapshot.menusNaming} contextMenu={contextMenu} loading={snapshot.menusLoading} busy={busy} detail={snapshot.menusDetail} message={snapshot.message} isError={snapshot.isError} send={send} close={() => setMenuManager(false)} />}
+    {menuManager && <MenuManager entries={snapshot.systemMenus} analysis={snapshot.menuAnalysis} contextMenu={contextMenu} loading={snapshot.menusLoading} busy={busy} detail={snapshot.menusDetail} message={snapshot.message} isError={snapshot.isError} send={send} close={() => setMenuManager(false)} />}
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><FolderCheck size={26} strokeWidth={1.8} /></span><div><strong>归序</strong><span>TidyDrop</span></div></div>
       <div className="nav-caption">工作空间</div>
       <nav aria-label="主导航">{nav.map(({ key, icon: Icon, label }) => <button className={`nav-item ${page === key ? 'active' : ''}`} key={key} onClick={() => setPage(key)}><Icon size={19} strokeWidth={1.7} /><span>{label}</span>{key === 'history' && completed > 0 && <b>{completed}</b>}</button>)}</nav>
       <div className="sidebar-destination"><span className="destination-symbol"><Folder size={20} /></span><span className="eyebrow">你的归档空间</span><strong title={settings.rootFolder}>{settings.rootFolder ? settings.rootFolder.split(/[/\\]/).filter(Boolean).at(-1) || settings.rootFolder : '选择一个归处'}</strong><p>{settings.rootFolder ? '分类文件夹会自动建立' : '设置一次，之后拖入就好'}</p><button disabled={busy} onClick={() => send({ command: 'pickRoot' })}>{settings.rootFolder ? '更改文件夹' : '选择文件夹'}<ArrowUpRight size={15} /></button></div>
       <button className="menu-widget" aria-label="打开右键菜单管理" onClick={openMenuManager}><Settings2 size={17} /><span><strong>右键菜单管理</strong><small>整理电脑里的菜单项</small></span><ChevronRight size={14} /></button>
-      <div className="sidebar-bottom"><div><ShieldCheck size={17} /><span>文件留在你的电脑上</span></div><span>TidyDrop <i>·</i> v0.7.0</span></div>
+      <div className="sidebar-bottom"><div><ShieldCheck size={17} /><span>文件留在你的电脑上</span></div><span>TidyDrop <i>·</i> v0.7.1</span></div>
     </aside>
     <main>
       <div className="topbar"><span>少一点杂乱，多一点从容</span><div><span className="local-pill"><i />本地运行</span><button className="icon-button" aria-label="使用帮助" title="使用帮助" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div></div>

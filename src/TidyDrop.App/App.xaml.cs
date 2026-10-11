@@ -23,14 +23,15 @@ public partial class App : Application
                 var entries = Task.Run(async () => {
                     var found = new MenuService().Scan();
                     var packaged = await ShellIntegration.InventoryAsync(); found.AddRange(packaged.Entries);
-                    return await DynamicMenuProbe.Enrich(found);
+                    return MenuMetadata.Read(found);
                 }).GetAwaiter().GetResult();
                 Console.Write(JsonSerializer.Serialize(entries)); Shutdown(0);
             }
             catch { Shutdown(1); }
             return;
         }
-        if (e.Args.FirstOrDefault() == "--menu-probe") { Shutdown(DynamicMenuProbe.RunHelper(e.Args)); return; }
+        // Reject the retired probe switch instead of treating its arguments as files.
+        if (e.Args.FirstOrDefault() == "--menu-probe") { Shutdown(2); return; }
         if (e.Args.FirstOrDefault() == "--menu-template-change") { Shutdown(MenuService.RunTemplateHelper(e.Args)); return; }
         if (e.Args.SequenceEqual(["--shortcut-check"]))
         {

@@ -32,9 +32,6 @@ public partial class MainWindow : Window
     private MenuAnalysis? menuAnalysis;
     private List<MenuEntry> systemMenus = [];
     private bool menusLoading;
-    private bool menusNaming;
-    private int menusRevision;
-    private CancellationTokenSource? menuNamesCancellation;
     private string menusDetail = "";
     private readonly bool smokeTest;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -149,7 +146,7 @@ public partial class MainWindow : Window
                 case "installContextMenu": await ChangeContextMenu(true); break;
                 case "removeContextMenu": await ChangeContextMenu(false); break;
                 case "repairContextMenu": await ChangeContextMenu(true, true); break;
-                case "systemMenus": DynamicMenuProbe.ClearCache(); await RefreshSystemMenus(); break;
+                case "systemMenus": await RefreshSystemMenus(); break;
                 case "analyzeMenuFile":
                     var fileDialog = new OpenFileDialog { Title = "选择需要分析右键菜单的文件", CheckFileExists = true };
                     if (fileDialog.ShowDialog(this) == true) { menuAnalysis = MenuService.Analyze(fileDialog.FileName); SendState(); }
@@ -308,7 +305,7 @@ public partial class MainWindow : Window
         Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
         {
             type = "state",
-            state = new { settings, items, history, library, contextMenu, systemMenus, menuAnalysis, menusLoading, menusNaming, menusDetail, busy, message, isError, pendingCount = queued.Count }
+            state = new { settings, items, history, library, contextMenu, systemMenus, menuAnalysis, menusLoading, menusDetail, busy, message, isError, pendingCount = queued.Count }
         }, JsonOptions));
     }
 
@@ -377,9 +374,6 @@ public partial class MainWindow : Window
     private async Task RefreshSystemMenus()
     {
         if (menusLoading) return;
-        menuNamesCancellation?.Cancel();
-        var revision = ++menusRevision;
-        menusNaming = false;
         menusLoading = true; menusDetail = ""; SendState();
         try
         {
@@ -398,27 +392,9 @@ public partial class MainWindow : Window
             catch (Exception ex) { systemMenus = []; menusDetail = "部分传统菜单无法读取：" + ex.Message; }
             try { var result = await packaged; systemMenus.AddRange(result.Entries); menusDetail += result.Detail; }
             catch (Exception ex) { menusDetail += "一级菜单暂未读取：" + ex.Message; }
+            systemMenus = MenuMetadata.Read(systemMenus);
         }
         finally { menusLoading = false; SendState(); }
-        if (!smokeTest)
-        {
-            menuNamesCancellation = new CancellationTokenSource();
-            _ = UpdateMenuNames(systemMenus.ToList(), revision, menuNamesCancellation.Token);
-        }
-    }
-
-    private async Task UpdateMenuNames(List<MenuEntry> entries, int revision, CancellationToken cancellation)
-    {
-        menusNaming = true; SendState();
-        try
-        {
-            var named = await DynamicMenuProbe.Enrich(entries, cancellation);
-            // Never publish an old snapshot over a refresh or a menu change.
-            if (revision == menusRevision && !busy && !cancellation.IsCancellationRequested) systemMenus = named;
-        }
-        catch (OperationCanceledException) { }
-        catch { /* Keep the usable registration list and its distinguishable fallback names. */ }
-        finally { if (revision == menusRevision) { menusNaming = false; SendState(); } }
     }
 
     private async Task ToggleSystemMenu(string id, bool enabled)

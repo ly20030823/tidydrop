@@ -138,6 +138,16 @@ try
     Check(specials.SetManyEnabled([sendEntry.Id], true).Count == 1 && specials.Scan().Single(e => e.Id == sendEntry.Id).Managed, "changed shortcut refuses restoration and retains its journal");
     Check(MenuService.Analyze(material).Locations.Contains(name) && MenuService.Analyze(sendTo).Locations.Contains("Directory"), "object analysis resolves current ProgID and directory sources");
     Check(MenuService.RunTemplateHelper(["--menu-template-change", "wrong-sid", "disable", templateEntry.Id]) != 0, "elevated helper rejects a different account and arbitrary arguments");
+    // A COM server may show UI during creation, before any menu command is invoked.
+    // These registered fixture identities must survive name processing untouched.
+    var foreignDynamic = new MenuEntry("foreign-dynamic", "未知播放命令", "测试播放器", "音频", "动态命令", false, true, true,
+        "保留恢复记录", "foreign-command", "audio", Clsid: clsid, Verb: "Play");
+    var foreignPackaged = foreignDynamic with { Id = "foreign-package", Kind = "一级菜单", CanToggle = false, RawName = "OpaqueVerb" };
+    var own = foreignDynamic with { Id = "own-copy", Clsid = "62F68386-2117-4D94-9405-C9B792BE8EEB", Title = "CopyPath" };
+    var named = MenuMetadata.Read([foreignDynamic, foreignPackaged, own]);
+    Check(named.Count == 3 && named[0] == foreignDynamic && named[1] == foreignPackaged,
+        "passive names preserve unknown dynamic identities, states and restoration records without probing");
+    Check(named[2] == own with { Title = "复制文件路径" }, "known copy-path label requires no component activation");
 }
 finally
 {
