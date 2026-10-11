@@ -387,7 +387,8 @@ public partial class MainWindow : Window
             await CheckScript("document.querySelectorAll('.archive-row').length === 2 && Array.from(document.querySelectorAll('.archive-row')).every(row => row.dataset.category === '图片')");
             await Browser.ExecuteScriptAsync("document.querySelector('.reset-filters').click()");
             await CheckScript("document.querySelectorAll('.archive-row').length === 6");
-            await Task.Delay(100);
+            await CheckViewAnimations();
+            await Task.Delay(260);
             using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-types.png")))
                 await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
             // React-controlled input: dispatch a native edit so onChange observes the new value.
@@ -422,7 +423,7 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '撤销').click()");
             await WaitUntil(() => Task.FromResult(!busy && history.All(entry => entry.State == "已撤销")));
             if (File.ReadAllText(source) != "React bridge check 中文") throw new IOException("Bridge undo check failed.");
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\n");
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-checks.txt"), "PASS React rendering\nPASS settings bridge\nPASS preview and organize bridge\nPASS history and undo bridge (file and folder)\nPASS shortcut creation and reuse\nPASS local IPC file forwarding without navigation\nPASS multi-day and month timeline\nPASS date and type cross-filtering and counts\nPASS filter preservation when switching views\nPASS search trimming, empty results, and reset\nPASS manual catalog update and persisted reopening\nPASS animated view switching, rapid clicks, reduced motion, and fallback\n");
             Application.Current.Shutdown(0);
         }
         catch (Exception ex) { Fail(ex); }
@@ -433,6 +434,68 @@ public partial class MainWindow : Window
         var folder = Path.Combine(settings.RootFolder, "归序", date.ToString("yyyy-MM"), date.ToString("yyyy-MM-dd"), category);
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, name), "Generated library check fixture");
+    }
+
+    private async Task CheckViewAnimations()
+    {
+        await Browser.ExecuteScriptAsync("""
+            window.__motionCheck = {start: document.startViewTransition, media: window.matchMedia, started: 0, finished: 0, ready: false};
+            window.matchMedia = function(query) { return query === '(prefers-reduced-motion: reduce)' ? {matches:false} : window.__motionCheck.media.call(window, query); };
+            if (typeof document.startViewTransition === 'function') {
+              document.startViewTransition = function(update) {
+                const probe = window.__motionCheck;
+                probe.started++;
+                const active = probe.start.call(this, update);
+                active.ready.then(() => {
+                  probe.ready = getComputedStyle(document.documentElement, '::view-transition-new(archive-content)').animationName.includes('archive-enter');
+                }).catch(() => {});
+                active.finished.catch(() => {}).then(() => { probe.finished++; });
+                return active;
+              };
+            }
+            Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按日期').click();
+            """);
+        try
+        {
+            await CheckScript("document.querySelector('.view-date') !== null && document.querySelectorAll('.archive-row').length === 6");
+            if (await Browser.ExecuteScriptAsync("typeof window.__motionCheck.start === 'function'") == "true")
+            {
+                await CheckScript("window.__motionCheck.ready");
+                using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-transition.png")))
+                    await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
+                await CheckScript("window.__motionCheck.finished === window.__motionCheck.started");
+                await Browser.ExecuteScriptAsync("""
+                    const buttons = Array.from(document.querySelectorAll('.view-switch button'));
+                    buttons.find(b => b.textContent === '按类型').click();
+                    buttons.find(b => b.textContent === '按日期').click();
+                    buttons.find(b => b.textContent === '按类型').click();
+                    """);
+                await CheckScript("document.querySelector('.view-type') !== null && document.querySelectorAll('.archive-row').length === 6");
+                await CheckScript("window.__motionCheck.finished === window.__motionCheck.started");
+                // Exercise a click while an animation is already showing snapshots.
+                await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按日期').click()");
+                await CheckScript("document.querySelector('.view-date') !== null");
+                await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按类型').click()");
+                await CheckScript("document.querySelector('.view-type') !== null");
+                await CheckScript("window.__motionCheck.finished === window.__motionCheck.started");
+            }
+            await Browser.ExecuteScriptAsync("""
+                window.__motionCheck.beforeReduced = window.__motionCheck.started;
+                window.matchMedia = function(query) { return query === '(prefers-reduced-motion: reduce)' ? {matches:true} : window.__motionCheck.media.call(window, query); };
+                Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按日期').click();
+                """);
+            await CheckScript("document.querySelector('.view-date') !== null && window.__motionCheck.started === window.__motionCheck.beforeReduced");
+            await Browser.ExecuteScriptAsync("""
+                document.startViewTransition = undefined;
+                window.matchMedia = window.__motionCheck.media;
+                Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按类型').click();
+                """);
+            await CheckScript("document.querySelector('.view-type .view-fallback') !== null && document.querySelectorAll('.archive-row').length === 6");
+        }
+        finally
+        {
+            await Browser.ExecuteScriptAsync("document.startViewTransition = window.__motionCheck.start; window.matchMedia = window.__motionCheck.media; delete window.__motionCheck");
+        }
     }
 
     private Task CheckScript(string predicate) => WaitUntil(async () => await Browser.ExecuteScriptAsync(predicate) == "true");

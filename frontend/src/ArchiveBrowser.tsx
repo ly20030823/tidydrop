@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Archive, ArrowDownToLine, CalendarDays, ChevronRight, FolderOpen, LayoutGrid, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
 import { categoryInfo, Glyph } from './FileGlyph';
 
@@ -26,6 +27,31 @@ function ArchiveRow({ item, showDate, busy, send }: { item: ArchiveItem; showDat
 
 export function ArchiveBrowser({ library, rootFolder, busy, send, onOrganize }: Props) {
   const [view, setView] = useState<'date' | 'type'>('date');
+  const requestedView = useRef(view);
+  const transition = useRef<ViewTransition | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; transition.current?.skipTransition(); };
+  }, []);
+  function changeView(next: 'date' | 'type') {
+    if (requestedView.current === next) return;
+    requestedView.current = next;
+    transition.current?.skipTransition();
+    if (typeof document.startViewTransition !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setView(next);
+      return;
+    }
+    const active = document.startViewTransition(() => {
+      // A newer click supersedes a snapshot that has not finished capturing yet.
+      if (mounted.current && requestedView.current === next) flushSync(() => setView(next));
+    });
+    transition.current = active;
+    void active.ready.catch(() => {});
+    void active.finished.catch(() => {}).then(() => {
+      if (transition.current === active) transition.current = null;
+    });
+  }
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [search, setSearch] = useState('');
@@ -49,13 +75,14 @@ export function ArchiveBrowser({ library, rootFolder, busy, send, onOrganize }: 
   return <section className={`library-section view-${view}`}>
     <div className="library-toolbar">
       <div className="view-switch" role="group" aria-label="归档视图">
-        <button className={view === 'date' ? 'selected' : ''} aria-pressed={view === 'date'} onClick={() => setView('date')}><CalendarDays size={16} />按日期</button>
-        <button className={view === 'type' ? 'selected' : ''} aria-pressed={view === 'type'} onClick={() => setView('type')}><LayoutGrid size={16} />按类型</button>
+        <button className={view === 'date' ? 'selected' : ''} aria-pressed={view === 'date'} onClick={() => changeView('date')}><CalendarDays size={16} />按日期</button>
+        <button className={view === 'type' ? 'selected' : ''} aria-pressed={view === 'type'} onClick={() => changeView('type')}><LayoutGrid size={16} />按类型</button>
       </div>
       <label className="search-box"><Search size={16} /><input aria-label="搜索归档空间" placeholder="搜索材料名称或路径" value={search} onChange={e => setSearch(e.target.value)} />{search && <button className="clear-search" aria-label="清空搜索" onClick={() => setSearch('')}><X size={13} /></button>}</label>
       <button className="button subtle" aria-label="刷新" title="更新材料清单并刷新当前显示" disabled={busy} onClick={() => send({ command: 'refreshLibrary' })}><RefreshCw size={14} />刷新</button>
       <button className="button primary" onClick={onOrganize}><ArrowDownToLine size={15} />收纳新材料</button>
     </div>
+    <div className={`archive-view-panel ${typeof document.startViewTransition === 'function' ? '' : 'view-fallback'}`} key={view}>
     <div className="browse-summary"><div><h2>{view === 'date' ? '按天回顾收下的材料' : '从分类里找到需要的材料'}</h2><p>{view === 'date' ? `共 ${library.length} 份材料，分布在 ${dates.length} 个收纳日` : '选择一张分类卡片，可跨日期查看同类材料'}</p></div>{hasFilters && <button className="reset-filters" onClick={reset}><X size={13} />清除筛选</button>}</div>
     {view === 'date' ? <div className="date-browser">
       <aside className="date-rail" aria-label="按收纳日筛选"><div className="group-caption">收纳日期</div><button className={`all-days ${!selectedDate ? 'selected' : ''}`} aria-pressed={!selectedDate} onClick={() => setSelectedDate('')}><CalendarDays size={15} /><span>全部日期</span><b>{inCategory.length}</b></button>
@@ -76,5 +103,6 @@ export function ArchiveBrowser({ library, rootFolder, busy, send, onOrganize }: 
       </div>
     </>}
     <div className="gentle-tip"><ShieldCheck size={15} />两种视图查看同一份材料。打开位置会进入实际文件夹，并选中材料。</div>
+    </div>
   </section>;
 }
