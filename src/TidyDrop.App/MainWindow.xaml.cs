@@ -388,7 +388,7 @@ public partial class MainWindow : Window
             await Browser.ExecuteScriptAsync("document.querySelector('.reset-filters').click()");
             await CheckScript("document.querySelectorAll('.archive-row').length === 6");
             await CheckViewAnimations();
-            await Task.Delay(260);
+            await Task.Delay(520);
             using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-types.png")))
                 await Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, output);
             // React-controlled input: dispatch a native edit so onChange observes the new value.
@@ -439,7 +439,7 @@ public partial class MainWindow : Window
     private async Task CheckViewAnimations()
     {
         await Browser.ExecuteScriptAsync("""
-            window.__motionCheck = {start: document.startViewTransition, media: window.matchMedia, started: 0, finished: 0, ready: false};
+            window.__motionCheck = {start: document.startViewTransition, media: window.matchMedia, started: 0, finished: 0, ready: false, directions: new Set()};
             window.matchMedia = function(query) { return query === '(prefers-reduced-motion: reduce)' ? {matches:false} : window.__motionCheck.media.call(window, query); };
             if (typeof document.startViewTransition === 'function') {
               document.startViewTransition = function(update) {
@@ -447,7 +447,11 @@ public partial class MainWindow : Window
                 probe.started++;
                 const active = probe.start.call(this, update);
                 active.ready.then(() => {
-                  probe.ready = getComputedStyle(document.documentElement, '::view-transition-new(archive-content)').animationName.includes('archive-enter');
+                  const direction = document.querySelector('.view-type') ? 'left' : 'right';
+                  const incoming = getComputedStyle(document.documentElement, '::view-transition-new(archive-content)');
+                  const outgoing = getComputedStyle(document.documentElement, '::view-transition-old(archive-content)');
+                  probe.ready = incoming.animationName === 'archive-enter-' + direction && outgoing.animationName === 'archive-leave-' + direction && incoming.animationDuration === '0.5s';
+                  if (probe.ready) probe.directions.add(direction);
                 }).catch(() => {});
                 active.finished.catch(() => {}).then(() => { probe.finished++; });
                 return active;
@@ -478,6 +482,7 @@ public partial class MainWindow : Window
                 await Browser.ExecuteScriptAsync("Array.from(document.querySelectorAll('.view-switch button')).find(b => b.textContent === '按类型').click()");
                 await CheckScript("document.querySelector('.view-type') !== null");
                 await CheckScript("window.__motionCheck.finished === window.__motionCheck.started");
+                await CheckScript("window.__motionCheck.directions.has('left') && window.__motionCheck.directions.has('right')");
             }
             await Browser.ExecuteScriptAsync("""
                 window.__motionCheck.beforeReduced = window.__motionCheck.started;

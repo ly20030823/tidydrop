@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>TidyDrop</AssemblyName>
-    <Version>0.5.1</Version>
+    <Version>0.5.2</Version>
     <Product>归序</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/TidyDrop.ico</ApplicationIcon>

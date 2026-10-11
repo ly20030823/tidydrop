@@ -38,6 +38,7 @@ export function ArchiveBrowser({ library, rootFolder, busy, send, onOrganize }: 
     if (requestedView.current === next) return;
     requestedView.current = next;
     transition.current?.skipTransition();
+    document.documentElement.dataset.archiveDirection = next === 'type' ? 'left' : 'right';
     if (typeof document.startViewTransition !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setView(next);
       return;
@@ -82,6 +83,7 @@ export function ArchiveBrowser({ library, rootFolder, busy, send, onOrganize }: 
       <button className="button subtle" aria-label="刷新" title="更新材料清单并刷新当前显示" disabled={busy} onClick={() => send({ command: 'refreshLibrary' })}><RefreshCw size={14} />刷新</button>
       <button className="button primary" onClick={onOrganize}><ArrowDownToLine size={15} />收纳新材料</button>
     </div>
+    <div className="archive-view-viewport">
     <div className={`archive-view-panel ${typeof document.startViewTransition === 'function' ? '' : 'view-fallback'}`} key={view}>
     <div className="browse-summary"><div><h2>{view === 'date' ? '按天回顾收下的材料' : '从分类里找到需要的材料'}</h2><p>{view === 'date' ? `共 ${library.length} 份材料，分布在 ${dates.length} 个收纳日` : '选择一张分类卡片，可跨日期查看同类材料'}</p></div>{hasFilters && <button className="reset-filters" onClick={reset}><X size={13} />清除筛选</button>}</div>
     {view === 'date' ? <div className="date-browser">
@@ -103,6 +105,7 @@ export function ArchiveBrowser({ library, rootFolder, busy, send, onOrganize }: 
       </div>
     </>}
     <div className="gentle-tip"><ShieldCheck size={15} />两种视图查看同一份材料。打开位置会进入实际文件夹，并选中材料。</div>
+    </div>
     </div>
   </section>;
 }
