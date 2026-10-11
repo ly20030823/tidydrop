@@ -39,7 +39,13 @@ internal static class ShellIntegration
     public static async Task<(List<MenuEntry> Entries, string Detail)> InventoryAsync()
     {
         using var result = await RunScript("inventory");
-        return (result.RootElement.GetProperty("entries").Deserialize<List<MenuEntry>>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [], result.RootElement.GetProperty("detail").GetString() ?? "");
+        var entries = result.RootElement.GetProperty("entries").Deserialize<List<MenuEntry>>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+        entries = entries.Select(e => {
+            var source = MenuLabels.Software(e.Source);
+            var scope = e.Scope.StartsWith("特定类型 · ", StringComparison.Ordinal) ? "特定类型 · " + MenuLabels.FileType(e.Scope[7..]) : e.Scope;
+            return e with { Source = source, Title = MenuLabels.Command(e.Title, source, true), Scope = scope };
+        }).ToList();
+        return (entries, result.RootElement.GetProperty("detail").GetString() ?? "");
     }
 
     public static void NotifyShell() => SHChangeNotify(0x08000000, 0x1000, IntPtr.Zero, IntPtr.Zero);

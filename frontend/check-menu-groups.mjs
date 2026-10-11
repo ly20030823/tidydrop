@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { groupMenus, scopeSummary } from './src/MenuGroups.ts';
+const entry = (id, changes = {}) => ({ id, title: '菜单功能', source: '测试软件', scope: '所有文件', kind: '更多选项', enabled: true, canToggle: true, managed: false, detail: '', ...changes });
+const entries = [entry('a'), entry('b', { scope: '文件夹', enabled: false, managed: true }), entry('c', { canToggle: false }), entry('d', { kind: '一级菜单', canToggle: false })];
+const groups = groupMenus(entries);
+assert.equal(groups.length, 2);
+const group = groups.find(g => g.kind === '更多选项');
+assert.deepEqual(group.entries.map(e => e.id), ['a', 'b', 'c']);
+assert.deepEqual(group.editable.map(e => e.id), ['a', 'b']);
+assert.deepEqual(group.managed.map(e => e.id), ['b']);
+assert.deepEqual(group.scopes, ['所有文件', '文件夹']);
+assert.deepEqual(groupMenus(entries.filter(e => e.scope === '文件夹'))[0].editable.map(e => e.id), ['b']);
+assert.equal(scopeSummary(['特定类型 · TXT 文件', '特定类型 · PNG 文件', '特定类型 · PDF 文档']), 'TXT 文件、PNG 文件等 3 类文件');
+console.log('PASS menu grouping preserves opaque IDs, permissions, recovery, layers and filtered scope');

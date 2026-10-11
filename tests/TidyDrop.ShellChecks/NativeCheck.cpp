@@ -58,7 +58,7 @@ class PendingSelection final : public IShellItemArray {
     LONG refs_ = 1;
     ComPtr<IShellItem> item_;
 public:
-    explicit PendingSelection(IShellItem* item) { item_.Attach(new PendingItem(item)); }
+    explicit PendingSelection(IShellItem* item) { if (item) item_.Attach(new PendingItem(item)); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override {
         if (!value) return E_POINTER; *value = nullptr;
         if (iid != IID_IUnknown && iid != IID_IShellItemArray) return E_NOINTERFACE;
@@ -66,8 +66,8 @@ public:
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs_); }
     ULONG STDMETHODCALLTYPE Release() override { const auto count = InterlockedDecrement(&refs_); if (!count) delete this; return count; }
-    HRESULT STDMETHODCALLTYPE GetCount(DWORD* v) override { if (!v) return E_POINTER; *v = 1; return S_OK; }
-    HRESULT STDMETHODCALLTYPE GetItemAt(DWORD index, IShellItem** v) override { if (!v) return E_POINTER; *v = nullptr; if (index) return E_INVALIDARG; return item_.CopyTo(v); }
+    HRESULT STDMETHODCALLTYPE GetCount(DWORD* v) override { if (!v) return E_POINTER; *v = item_ ? 1 : 0; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetItemAt(DWORD index, IShellItem** v) override { if (!v) return E_POINTER; *v = nullptr; if (index || !item_) return E_INVALIDARG; return item_.CopyTo(v); }
     HRESULT STDMETHODCALLTYPE BindToHandler(IBindCtx*, REFGUID, REFIID, void**) override { return E_NOTIMPL; }
     HRESULT STDMETHODCALLTYPE GetPropertyStore(GETPROPERTYSTOREFLAGS, REFIID, void**) override { return E_NOTIMPL; }
     HRESULT STDMETHODCALLTYPE GetPropertyDescriptionList(REFPROPERTYKEY, REFIID, void**) override { return E_NOTIMPL; }
@@ -126,8 +126,11 @@ int wmain(int argc, wchar_t** argv) {
         EXPCMDFLAGS flags; Check(command->GetFlags(&flags));
         if (flags != ECF_DEFAULT) throw std::runtime_error("Command unexpectedly has submenus");
         EXPCMDSTATE state; Check(command->GetState(nullptr, FALSE, &state));
-        if (state != ECS_HIDDEN) throw std::runtime_error("Command visible without a selection");
-        std::cout << "PASS single command and empty-selection state\n";
+        if (state != ECS_ENABLED) throw std::runtime_error("Early Explorer probe hides command");
+        ComPtr<IShellItemArray> empty; empty.Attach(new PendingSelection(nullptr));
+        Check(command->GetState(empty.Get(), FALSE, &state));
+        if (state != ECS_HIDDEN) throw std::runtime_error("Explicit empty selection visible");
+        std::cout << "PASS early Explorer probe and explicit empty-selection distinction\n";
         const std::filesystem::path root(argv[2]);
         std::filesystem::create_directories(root / L"项目 材料, v1");
         const auto file = (root / L"会议 终稿, v1.txt").wstring();
@@ -154,6 +157,21 @@ int wmain(int argc, wchar_t** argv) {
         Check(command->Invoke(multiple.Get(), nullptr));
         if (ClipboardText() != file + L"\r\n" + folder + L"\r\n" + special) throw std::runtime_error("Multi-selection order/line breaks differ");
         std::cout << "PASS multiple selections use one unquoted path per line\n";
+        ComPtr<IObjectWithSelection> selectedObject; Check(command.As(&selectedObject));
+        Check(selectedObject->SetSelection(multiple.Get()));
+        Check(command->GetState(nullptr, FALSE, &state));
+        if (state != ECS_ENABLED) throw std::runtime_error("Stored selection not enabled");
+        Check(command->Invoke(nullptr, nullptr));
+        if (ClipboardText() != file + L"\r\n" + folder + L"\r\n" + special) throw std::runtime_error("Stored selection copied incorrectly");
+        if (SUCCEEDED(command->Invoke(empty.Get(), nullptr))) throw std::runtime_error("Explicit empty selection used stale items");
+        ComPtr<IObjectWithSite> siteObject; Check(command.As(&siteObject));
+        Check(siteObject->SetSite(nullptr));
+        ComPtr<IShellItemArray> reset;
+        if (SUCCEEDED(selectedObject->GetSelection(IID_PPV_ARGS(&reset)))) throw std::runtime_error("Site reset retains stale selection");
+        auto virtualSelection = Selection({L"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"});
+        Check(command->GetState(virtualSelection.Get(), FALSE, &state));
+        if (state != ECS_HIDDEN || SUCCEEDED(command->Invoke(virtualSelection.Get(), nullptr))) throw std::runtime_error("Virtual item accepted");
+        std::cout << "PASS stored selections, explicit empty override, site reset and virtual-item rejection\n";
         const auto saved = ClipboardText();
         if (SUCCEEDED(command->Invoke(nullptr, nullptr)) || ClipboardText() != saved) throw std::runtime_error("Invalid selection changed clipboard");
         std::cout << "PASS invalid selection leaves clipboard intact\n";

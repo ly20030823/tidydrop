@@ -84,7 +84,7 @@ function App() {
       <nav aria-label="主导航">{nav.map(({ key, icon: Icon, label }) => <button className={`nav-item ${page === key ? 'active' : ''}`} key={key} onClick={() => setPage(key)}><Icon size={19} strokeWidth={1.7} /><span>{label}</span>{key === 'history' && completed > 0 && <b>{completed}</b>}</button>)}</nav>
       <div className="sidebar-destination"><span className="destination-symbol"><Folder size={20} /></span><span className="eyebrow">你的归档空间</span><strong title={settings.rootFolder}>{settings.rootFolder ? settings.rootFolder.split(/[/\\]/).filter(Boolean).at(-1) || settings.rootFolder : '选择一个归处'}</strong><p>{settings.rootFolder ? '分类文件夹会自动建立' : '设置一次，之后拖入就好'}</p><button disabled={busy} onClick={() => send({ command: 'pickRoot' })}>{settings.rootFolder ? '更改文件夹' : '选择文件夹'}<ArrowUpRight size={15} /></button></div>
       <button className="menu-widget" aria-label="打开右键菜单管理" onClick={openMenuManager}><Settings2 size={17} /><span><strong>右键菜单管理</strong><small>整理电脑里的菜单项</small></span><ChevronRight size={14} /></button>
-      <div className="sidebar-bottom"><div><ShieldCheck size={17} /><span>文件留在你的电脑上</span></div><span>TidyDrop <i>·</i> v0.6.2</span></div>
+      <div className="sidebar-bottom"><div><ShieldCheck size={17} /><span>文件留在你的电脑上</span></div><span>TidyDrop <i>·</i> v0.6.3</span></div>
     </aside>
     <main>
       <div className="topbar"><span>少一点杂乱，多一点从容</span><div><span className="local-pill"><i />本地运行</span><button className="icon-button" aria-label="使用帮助" title="使用帮助" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div></div>

@@ -11,7 +11,7 @@ $ProgressPreference = 'SilentlyContinue'
 $env:PSModulePath = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\Modules'
 $packageName = 'TidyDrop.CopyPath'
 $publisher = 'CN=TidyDrop Local Development'
-$packageVersion = '0.6.2.0'
+$packageVersion = '0.6.3.0'
 $appDirectory = Split-Path $PSScriptRoot -Parent
 $marker = 'HKCU:\Software\TidyDrop\CopyPathMenu'
 $machineMarker = 'HKLM:\SOFTWARE\TidyDrop\CopyPathTrust'

@@ -7,7 +7,7 @@
  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
  IgnorableNamespaces="uap uap10 rescap com desktop4 desktop5">
-  <Identity Name="TidyDrop.CopyPath" Publisher="CN=TidyDrop Local Development" Version="0.6.2.0" ProcessorArchitecture="x64" />
+  <Identity Name="TidyDrop.CopyPath" Publisher="CN=TidyDrop Local Development" Version="0.6.3.0" ProcessorArchitecture="x64" />
  <Properties><DisplayName>归序</DisplayName><PublisherDisplayName>TidyDrop</PublisherDisplayName><Logo>Shell\Assets\Logo.png</Logo><uap10:AllowExternalContent>true</uap10:AllowExternalContent></Properties>
  <Resources><Resource Language="zh-CN" /></Resources>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" /></Dependencies>

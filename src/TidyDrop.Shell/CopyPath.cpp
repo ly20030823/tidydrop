@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <shobjidl.h>
 #include <shlwapi.h>
+#include <shlguid.h>
+#include <wrl/client.h>
 #include <new>
 #include <string>
 
@@ -62,19 +64,46 @@ static HRESULT CopySelection(IShellItemArray* items) noexcept
     catch (...) { return E_FAIL; }
 }
 
-class CopyPath final : public IExplorerCommand {
+class CopyPath final : public IExplorerCommand, public IObjectWithSite, public IObjectWithSelection {
     LONG references = 1;
+    Microsoft::WRL::ComPtr<IUnknown> site;
+    Microsoft::WRL::ComPtr<IShellItemArray> suppliedSelection;
+    HRESULT Selection(IShellItemArray* given, IShellItemArray** result) noexcept {
+        if (!result) return E_POINTER;
+        *result = nullptr;
+        // Never replace an explicit empty selection with stale cached items.
+        if (given) { given->AddRef(); *result = given; return S_OK; }
+        if (suppliedSelection) return suppliedSelection.CopyTo(result);
+        if (!site) return E_FAIL;
+        Microsoft::WRL::ComPtr<IFolderView2> view;
+        const HRESULT hr = IUnknown_QueryService(site.Get(), SID_SFolderView, IID_PPV_ARGS(&view));
+        if (FAILED(hr)) return hr;
+        return view->GetSelection(FALSE, result); // An empty selection must not mean the parent folder.
+    }
 public:
     CopyPath() { InterlockedIncrement(&objects); }
     ~CopyPath() { InterlockedDecrement(&objects); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override {
         if (!value) return E_POINTER;
         *value = nullptr;
-        if (iid != __uuidof(IUnknown) && iid != __uuidof(IExplorerCommand)) return E_NOINTERFACE;
-        *value = static_cast<IExplorerCommand*>(this); AddRef(); return S_OK;
+        if (iid == __uuidof(IUnknown) || iid == __uuidof(IExplorerCommand)) *value = static_cast<IExplorerCommand*>(this);
+        else if (iid == __uuidof(IObjectWithSite)) *value = static_cast<IObjectWithSite*>(this);
+        else if (iid == __uuidof(IObjectWithSelection)) *value = static_cast<IObjectWithSelection*>(this);
+        else return E_NOINTERFACE;
+        AddRef(); return S_OK;
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&references); }
     ULONG STDMETHODCALLTYPE Release() override { const auto left = InterlockedDecrement(&references); if (!left) delete this; return left; }
+    HRESULT STDMETHODCALLTYPE SetSite(IUnknown* value) override { site = value; suppliedSelection.Reset(); return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetSite(REFIID iid, void** value) override { if (!value) return E_POINTER; *value = nullptr; return site ? site->QueryInterface(iid, value) : E_FAIL; }
+    HRESULT STDMETHODCALLTYPE SetSelection(IShellItemArray* value) override { suppliedSelection = value; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetSelection(REFIID iid, void** value) override {
+        if (!value) return E_POINTER;
+        *value = nullptr;
+        Microsoft::WRL::ComPtr<IShellItemArray> selected;
+        const HRESULT hr = Selection(nullptr, &selected);
+        return SUCCEEDED(hr) && selected ? selected->QueryInterface(iid, value) : E_FAIL;
+    }
     HRESULT STDMETHODCALLTYPE GetTitle(IShellItemArray*, PWSTR* title) override { return title ? SHStrDupW(L"复制文件路径", title) : E_POINTER; }
     HRESULT STDMETHODCALLTYPE GetIcon(IShellItemArray*, PWSTR* icon) override {
         if (!icon) return E_POINTER;
@@ -90,10 +119,18 @@ public:
     HRESULT STDMETHODCALLTYPE GetState(IShellItemArray* items, BOOL okToBeSlow, EXPCMDSTATE* state) override {
         if (!state) return E_POINTER;
         *state = ECS_HIDDEN;
+        Microsoft::WRL::ComPtr<IShellItemArray> selected;
+        if (FAILED(Selection(items, &selected)) || !selected) {
+            // Explorer also probes commands before it supplies their selection/site.
+            // Our manifest registers only selected files/directories; invocation still
+            // requires a concrete filesystem selection before touching the clipboard.
+            if (!items && !suppliedSelection) *state = ECS_ENABLED;
+            return S_OK;
+        }
         DWORD count = 0;
-        if (!items || FAILED(items->GetCount(&count)) || !count) return S_OK;
+        if (FAILED(selected->GetCount(&count)) || !count) return S_OK;
         IShellItem* first = nullptr;
-        if (FAILED(items->GetItemAt(0, &first))) return S_OK;
+        if (FAILED(selected->GetItemAt(0, &first))) return S_OK;
         SFGAOF attributes = 0;
         const HRESULT hr = first->GetAttributes(SFGAO_FILESYSTEM, &attributes);
         if (SUCCEEDED(hr)) {
@@ -113,7 +150,11 @@ public:
         first->Release();
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE Invoke(IShellItemArray* items, IBindCtx*) override { return CopySelection(items); }
+    HRESULT STDMETHODCALLTYPE Invoke(IShellItemArray* items, IBindCtx*) override {
+        Microsoft::WRL::ComPtr<IShellItemArray> selected;
+        const HRESULT hr = Selection(items, &selected);
+        return SUCCEEDED(hr) ? CopySelection(selected.Get()) : E_INVALIDARG;
+    }
     HRESULT STDMETHODCALLTYPE GetFlags(EXPCMDFLAGS* flags) override { if (!flags) return E_POINTER; *flags = ECF_DEFAULT; return S_OK; }
     HRESULT STDMETHODCALLTYPE EnumSubCommands(IEnumExplorerCommand** commands) override { if (!commands) return E_POINTER; *commands = nullptr; return E_NOTIMPL; }
 };

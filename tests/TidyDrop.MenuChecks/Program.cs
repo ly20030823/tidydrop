@@ -52,6 +52,9 @@ try
     var all = manager.Scan();
     var item = all.Single(e => e.Title == "测试 菜单, 文件");
     Check(item.Enabled && item.CanToggle, "discover Unicode static command");
+    Check(MenuLabels.Software("Tencent.QQDesktop") == "QQ" && MenuLabels.Command("AskM365Copilot", "Microsoft 365 / Copilot", true) == "询问 Copilot"
+        && MenuLabels.Command("测试 中文菜单", "测试软件") == "测试 中文菜单", "friendly software labels preserve readable command names");
+    Check(new MenuRegistry(journal).Scan().Any(e => e.Id == item.Id && e.Scope.Contains(extensionName)), "active file association is discovered with its extension");
     if (args.Length > 0) Check(Visible(), "Windows Shell actually enumerates the registered fixture command");
     Check(!all.Single(e => e.Title == "open").CanToggle && !all.Single(e => e.Title == "external").CanToggle, "system verbs and externally disabled entries are protected");
     manager.SetEnabled(item.Id, false);
@@ -64,6 +67,10 @@ try
     if (args.Length > 0) Check(Visible(), "Windows Shell shows the restored fixture command");
     using (var key = Registry.CurrentUser.OpenSubKey(root + @"\shell\fixture")) Check(!key!.GetValueNames().Contains("LegacyDisable"), "restore removes only our flag");
     var extension = reopened.Scan().Single(e => e.Title == "fixture");
+    Check(reopened.SetManyEnabled([item.Id, extension.Id, "invalid"], false).Count == 1
+        && reopened.Scan().Where(e => e.Id == item.Id || e.Id == extension.Id).All(e => !e.Enabled && e.Managed), "grouped change reports partial failures and retains recovery per position");
+    Check(reopened.SetManyEnabled([item.Id, extension.Id], true).Count == 0
+        && reopened.Scan().Where(e => e.Id == item.Id || e.Id == extension.Id).All(e => e.Enabled && !e.Managed), "grouped recovery restores all original registrations");
     reopened.SetEnabled(extension.Id, false);
     using (var key = Registry.CurrentUser.OpenSubKey(root + @"\shellex\ContextMenuHandlers\fixture")) Check((string?)key!.GetValue("") == "-" + clsid, "scoped COM override stops only selected handler registration");
     reopened.SetEnabled(extension.Id, true);

@@ -147,6 +147,7 @@ public partial class MainWindow : Window
                 case "repairContextMenu": await ChangeContextMenu(true, true); break;
                 case "systemMenus": await RefreshSystemMenus(); break;
                 case "toggleSystemMenu": await ToggleSystemMenu(root.GetProperty("id").GetString() ?? "", root.GetProperty("enabled").GetBoolean()); break;
+                case "toggleSystemMenus": await ToggleSystemMenus(root.GetProperty("ids").EnumerateArray().Select(e => e.GetString() ?? "").Distinct().ToArray(), root.GetProperty("enabled").GetBoolean()); break;
                 case "restoreSystemMenus": await RestoreSystemMenus(); break;
                 case "reveal":
                     var archiveId = root.GetProperty("id").GetString();
@@ -364,7 +365,10 @@ public partial class MainWindow : Window
         {
             if (smokeTest)
             {
-                if (systemMenus.Count == 0) systemMenus = [new("fixture-menu", "测试软件菜单", "界面检查", "所有文件", "更多选项", true, true, false, "模拟项目，不修改系统。")];
+                if (systemMenus.Count == 0) systemMenus = [
+                    new("fixture-menu", "测试软件菜单", "界面检查", "所有文件", "更多选项", true, true, false, "模拟项目，不修改系统。"),
+                    new("fixture-menu-duplicate", "测试软件菜单", "界面检查", "所有文件", "更多选项", true, true, false, "模拟重复位置。"),
+                    new("fixture-menu-type", "测试软件菜单", "界面检查", "特定类型 · TXT 文件", "更多选项", true, true, false, "模拟文件类型。")];
                 return;
             }
             var registry = Task.Run(menuRegistry.Scan);
@@ -379,17 +383,28 @@ public partial class MainWindow : Window
     }
 
     private async Task ToggleSystemMenu(string id, bool enabled)
+        => await ToggleSystemMenus([id], enabled);
+
+    private async Task ToggleSystemMenus(string[] ids, bool enabled)
     {
         if (menusLoading) return;
+        if (ids.Length is 0 or > 512) throw new IOException("请选择需要调整的菜单功能。");
         busy = true; isError = false; message = enabled ? "正在恢复菜单…" : "正在停用菜单…"; SendState();
         try
         {
-            if (smokeTest) systemMenus = systemMenus.Select(e => e.Id == id ? e with { Enabled = enabled, Managed = !enabled } : e).ToList();
-            else { await Task.Run(() => menuRegistry.SetEnabled(id, enabled)); ShellIntegration.NotifyShell(); }
+            var errors = new List<string>();
+            if (smokeTest) systemMenus = systemMenus.Select(e => ids.Contains(e.Id) ? e with { Enabled = enabled, Managed = !enabled } : e).ToList();
+            else
+            {
+                errors = await Task.Run(() => menuRegistry.SetManyEnabled(ids, enabled));
+                ShellIntegration.NotifyShell();
+            }
             await RefreshSystemMenus();
-            message = enabled ? "菜单已恢复。请重新打开右键菜单。" : "菜单已为当前账户停用，可在这里恢复。若仍显示，请重开文件夹窗口或退出并重新登录 Windows。";
+            isError = errors.Count > 0;
+            message = errors.Count > 0 ? $"{errors.Count} 个位置未能调整：" + string.Join("；", errors.Distinct())
+                : enabled ? "已撤销归序对此功能的停用设置。请重新打开右键菜单。" : "菜单功能已为当前账户停用，可在这里恢复。若仍显示，请重开文件夹窗口或退出并重新登录 Windows。";
         }
-        catch (Exception ex) { message = "菜单未更改：" + ex.Message; isError = true; await RefreshSystemMenus(); }
+        catch (Exception ex) { message = "菜单调整未全部完成：" + ex.Message; isError = true; await RefreshSystemMenus(); }
         finally { busy = false; SendState(); await ProcessQueued(); }
     }
 
@@ -403,11 +418,7 @@ public partial class MainWindow : Window
             if (smokeTest) systemMenus = systemMenus.Select(e => e.Managed ? e with { Enabled = true, Managed = false } : e).ToList();
             else
             {
-                await Task.Run(() =>
-                {
-                    foreach (var entry in menuRegistry.Scan().Where(e => e.Managed).ToList())
-                        try { menuRegistry.SetEnabled(entry.Id, true); } catch (Exception ex) { errors.Add(entry.Title + "：" + ex.Message); }
-                });
+                errors = await Task.Run(() => menuRegistry.SetManyEnabled(menuRegistry.Scan().Where(e => e.Managed).Select(e => e.Id).ToArray(), true));
                 ShellIntegration.NotifyShell();
             }
             await RefreshSystemMenus();
@@ -461,8 +472,12 @@ public partial class MainWindow : Window
             await WaitUntil(() => Task.FromResult(!settings.AutoOrganize));
             await Browser.ExecuteScriptAsync("document.querySelector('[aria-label=\"打开右键菜单管理\"]').click()");
             await CheckScript("document.querySelector('#menu-title')?.textContent === '右键菜单管理' && document.querySelector('.system-menu-row') !== null");
+            await CheckScript("document.querySelectorAll('.system-menu-row').length === 1");
+            await Browser.ExecuteScriptAsync("document.querySelector('.menu-detail-toggle').click()");
+            await CheckScript("document.querySelectorAll('.menu-location-row').length === 2");
             await Browser.ExecuteScriptAsync("document.querySelector('.system-menu-row [role=switch]').click()");
             await CheckScript("document.querySelector('.system-menu-row [role=switch]')?.getAttribute('aria-checked') === 'false'");
+            if (systemMenus.Any(e => e.Enabled || !e.Managed)) throw new IOException("Grouped toggle did not cover all fixture positions.");
             await Browser.ExecuteScriptAsync("document.querySelector('.menu-restore').click()");
             await CheckScript("document.querySelector('.system-menu-row [role=switch]')?.getAttribute('aria-checked') === 'true'");
             using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-menu-manager.png")))

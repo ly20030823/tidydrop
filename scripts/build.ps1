@@ -11,6 +11,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw '安装前端依赖失败' }
         pnpm build
         if ($LASTEXITCODE -ne 0) { throw '前端构建失败' }
+        node check-menu-groups.mjs
+        if ($LASTEXITCODE -ne 0) { throw '菜单分组检查失败' }
     } finally { Pop-Location }
     dotnet run --project tests/TidyDrop.Checks/TidyDrop.Checks.csproj -c Release -- artifacts/checks
     if ($LASTEXITCODE -ne 0) { throw '核心检查失败' }

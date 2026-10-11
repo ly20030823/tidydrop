@@ -1,6 +1,6 @@
 # Windows 11「复制文件路径」菜单
 
-功能版本：v0.6.2。当前菜单组件支持 Windows 11 x64。
+功能版本：v0.6.3。当前菜单组件支持 Windows 11 x64。
 
 ## 使用
 
@@ -11,6 +11,8 @@
 在同一设置项点击「移除菜单」即可取消注册。移除只处理归序自己的组件与归序安装时新增的签名信任，不更改 Windows 自带命令或其他软件的菜单。
 
 v0.6.2 在添加、移除和修复后主动发送 Windows 外壳刷新通知，并在 Explorer 尚未提供项目属性时延后查询，避免直接隐藏命令。原注册范围已经包含全部文件和文件夹；桌面出现、文件夹不出现可能与 Explorer 缓存有关，不能仅凭包注册成功认定界面已正常。点击「修复归序菜单」会重新注册同版本组件并刷新。添加或修复后请关闭菜单再重新右键，重开文件夹窗口；如果仍未出现，可退出并重新登录 Windows，使资源管理器重新加载注册。归序不会自动强制重启资源管理器。
+
+v0.6.3 区分 Explorer 在尚未提供选中项时的提前状态查询和明确的空选择，并支持 `IObjectWithSelection` 与文件夹视图的选择回退。Invoke 始终要求实际文件系统项目，明确空选择不会使用先前的缓存选择。本机在更新后仍能复现旧进程不显示；重启资源管理器后，已实际核对文件夹内文件和文件夹均出现一级命令。刷新通知无法保证旧进程立即重新加载组件。
 
 外壳刷新遵循 [微软 SHChangeNotify 说明](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify)。菜单属性暂时不可用时使用 [GetState 的延后状态查询](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorercommand-getstate)。
 
